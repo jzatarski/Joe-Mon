@@ -1,0 +1,30 @@
+* THIS FILE IS HARDWARE EQUATES FOR THE BOARD
+* DUART stuff
+DUART1	EQU	$D00000	; base address of UART on mobo
+DUART_MRA	equ	$0	; offset of mode register A on DUSART
+DUART_CSRA	equ	$1	; clock select register A
+DUART_CRA	equ	$2	; Command Register A
+DUART_THRA	equ	$3	; Tx Holding Register A
+DUART_ACR	equ	$4	; Auxilary Control Register
+DUART_IMR	equ	$5	; Interupt Mask Register
+DUART_CTU	equ	$6	; Counter/Timer Upper Byte Register
+DUART_CTL	equ	$7	; Counter/Timer Lower Byte Register
+DUART_MRB	equ	$8	; Mode Register B
+DUART_CSRB	equ	$9	; Clock Select Register B
+DUART_CRB	equ	$A	; Command Register B
+DUART_THRB	equ	$B	; Tx Holding Register B
+DUART_IVR	equ	$C	; Interupt Vector Register
+DUART_OPCR	equ	$D	; Output Port Configuration Register
+DUART_SOPBC	equ	$E	; Set Output Port Bits Command
+DUART_COPBC	equ	$F	; Clear Output Port Bits Command
+DUART_SRA	equ	$1	; Status Register A
+DUART_MISR	equ	$2	; Masked Interupt Status Register
+DUART_RHRA	equ	$3	; Rx Holding Register A
+DUART_IPCR	equ	$4	; Input Port Change Register
+DUART_ISR	equ	$5	; Interupt Status Register
+DUART_SRB	equ	$9	; Status Register B
+DUART_RHRB	equ	$B	; Rx Holding Register B
+DUART_IP	equ	$D	; Input Port
+DUART_SCC	equ	$E	; Start Counter/Timer Command
+DUART_STC	equ	$F	; Stop Counter/Timer Command
+
