@@ -582,7 +582,6 @@ prompt_loop:	; loop which accepts and interprets monitor commands
 	align 1
 
 init_console:
-	move.w	#$D000,(PPORT)
 	move.b	#%00011010,(DUART1+DUART_CRA)	; resets pointer to MR1A and disables Tx and Rx
 	move.b	#0,(DUART1+DUART_CRA)	; removes command from register
 
@@ -596,7 +595,6 @@ init_console:
 	move.b	#0,(DUART1+DUART_IMR)	; disable interupts
 
 	move.b	#%00000101,(DUART1+DUART_CRA)	; turn on Tx and Rx for channel A
-	move.w	#$C000,(PPORT)
 
 	rts
 	
@@ -605,8 +603,6 @@ clr_screen:
 	; ^[[2J is the ECMA-48 control sequence to clear the whole screen
 	; trashes a0
 	; calls puts, which trashes other stuff
-	move.w	#$A000,(PPORT)
-
 	movea.l	#.escapesequence,a0
 	jmp	puts	; puts will return for us.
 	
@@ -749,16 +745,14 @@ load_srec:
 
 .record_start
 	jsr	getc
+
+	cmp.b	#esc,d0
+	beq	.abort
+
 	move.b	d0,d4	; store record type number in d4 for now
 
-	jsr	getc
-	move.b	d0,d1	; store most significant nibble of count in d1
-
-	jsr	getc	; get least significant nibble
-
-	; should check that the two characters are actually valid hex digits here
-
-	jsr	hex_to_num
+	jsr	get_hex_byte
+	bcs	.bad_char
 
 	move.b	d0,d2	; put the count in d2
 	add.b	d2,d3	; update checksum
@@ -784,10 +778,8 @@ load_srec:
 	jmp	.wait_for_cr	; other records not interpreted
 
 .s3_rec
-	jsr	getc	; get a byte
-	move.b	d0,d1
-	jsr	getc
-	jsr	hex_to_num
+	jsr	get_hex_byte
+	bcs	.bad_char
 
 	move.b	d0,d5	; add to address
 	add.b	d0,d3	; add to checksum
@@ -797,10 +789,8 @@ load_srec:
 	subq.b	#1,d2	; decrement count
 
 .s2_rec
-	jsr	getc	; get a byte
-	move.b	d0,d1
-	jsr	getc
-	jsr	hex_to_num
+	jsr	get_hex_byte
+	bcs	.bad_char
 
 	move.b	d0,d5	; add to address
 	add.b	d0,d3	; add to checksum
@@ -810,33 +800,26 @@ load_srec:
 	subq.b	#1,d2	; decrement count
 
 .s1_rec
-	jsr	getc	; get a byte
-	move.b	d0,d1
-	jsr	getc
-	jsr	hex_to_num
+	jsr	get_hex_byte
+	bcs	.bad_char
 
 	move.b	d0,d5	; add to address
 	add.b	d0,d3	; add to checksum
 
 	asl.l	#8,d5	; shift address left one byte
 
-	jsr	getc	; get a byte
-	move.b	d0,d1
-	jsr	getc
-	jsr	hex_to_num
+	jsr	get_hex_byte
+	bcs	.bad_char
 
 	move.b	d0,d5	; add to address
 	add.b	d0,d3	; add to checksum
 
 	movea.l	d5,a0	; transfer address to a0
 
-	subq.b	#2,d2	; decrement count, and decrement one more so that it is 0 before we get the checksum byte
+	subq.b	#2,d2	; decrement count
 
 .next_data
-	jsr	getc	; get a byte
-	move.b	d0,d1
-	jsr	getc
-	jsr	hex_to_num
+	jsr	get_hex_byte
 
 	add.b	d0,d3	; add to checksum
 
@@ -861,9 +844,9 @@ load_srec:
 	jmp	.next_record
 
 .record_error
-	move.b	#'X',d0	; put an X for a record with error
-	jsr	putc
-	jmp	.wait_for_cr
+	movea.l	#.bad_checksum_msg,a0
+	jsr	puts	; print bad checksum error
+	jmp	.wait_for_esc
 
 .s7_rec
 .s8_rec
@@ -871,23 +854,53 @@ load_srec:
 	jsr	getc	; wait for carriage return for now
 	cmp.b	#cr,d0	; this will do something later
 	bne	.s9_rec
-	rts
+
+	move.b	#cr,d0
+	jsr	putc
+	move.b	#lf,d0
+	jmp	putc
+
+.bad_char
+	movea.l	#.bad_char_msg,a0
+	jsr	puts	; print invalid character message
+
+	jmp	.wait_for_esc
+
+.wait_for_esc
+	movea.l	#.wait_for_esc_msg,a0
+	jsr	puts	; instruct user to press escape
+
+.wait_for_esc2
+	jsr	getc
+	cmp.b	#esc,d0
+	bne	.wait_for_esc2
 
 .abort
 	rts
 
 .ready	dc.b	"Ready to accept S-record:",cr,lf,0
+.bad_char_msg	dc.b	cr,lf,"Encountered invalid character.",cr,lf,0
+.bad_checksum_msg	dc.b	cr,lf,"Bad checksum.",cr,lf,0
+.wait_for_esc_msg	dc.b	"Please press escape to continue.",cr,lf,0
 
 	align 1
 
-hex_to_num:
-; takes a pair of ascii characters 0-9,A-F in d0 and d1
-; converts from hex to 1 byte
-; d1 holds most significant nibble
-; result is returned in d0
+get_hex_byte:
+; gets a pair of ascii characters and converts them into a byte
+; returns byte in d0
+; uses d1
+; calls getc (d0)
+; returns with carry set if either character was not valid
 
-	cmp.b	#'9',d0
-	bls	.d0_digit	; if it's '9' or less, it's a digit
+	jsr	getc
+	move.b	d0,d1
+	jsr	getc
+
+	cmp2.b	.digitbound,d0
+	bcc	.d0_digit	; if it's within the digit bounds, it's a numeral
+
+	cmp2.b	.letterbound,d0
+	bcs	.badchar	; if it's out of bounds, it's not a letter or a numeral
 
 	sub.b	#('A'-10),d0	; convert A-F to 10-15
 	jmp	.d1_conv
@@ -896,8 +909,11 @@ hex_to_num:
 	sub.b	#'0',d0	; convert chars 0-9 to numbers 0-9
 
 .d1_conv
-	cmp.b	#'9',d1
-	bls	.d1_digit	; if it's '9' or less, it's a digit
+	cmp2.b	.digitbound,d1
+	bcc	.d1_digit	; in bounds? then numeral
+
+	cmp2.b	.letterbound,d1
+	bcs	.badchar	; out of bounds? bad hex digit
 
 	sub.b	#('A'-10),d1	; convert A-F to 10-15
 	jmp	.combine
@@ -909,7 +925,18 @@ hex_to_num:
 	asl.b	#4,d1	; shift the MSN over by one nibble (4 bits)
 	add.b	d1,d0	; add MSN and LSN to combine into a byte in d0
 
+	andi	#%11111110,ccr	; make sure carry is clear
+
+.badchar	; the branches to here are bcs, so we exit with carry set if we go here
 	rts
+
+.digitbound
+	dc.b	'0','9'	; lower and upper bound for digit
+
+.letterbound
+	dc.b	'A','F'	; lower and upper bound for letters
+
+	align 1
 
 jump:
 	jmp	rambase
