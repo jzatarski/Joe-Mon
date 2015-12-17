@@ -948,7 +948,6 @@ jump:
 
 boot:	
 	andi	#%0011111111111111,sr	; clear trace bits
-	ori	#%0010011100000000,sr	; set supervisor bit and change interrupt mask to %111
 	movea.l	#rambase,a0	; set vector base register
 	movec	a0,vbr
 	movea.l	(rambase),a7	; set supervisor stack register
