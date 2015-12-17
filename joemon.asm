@@ -721,7 +721,7 @@ ver:
 	dc.b	"A Machine Language Monitor written for the Beckman DU600 spectrophotometer and other 68K based machines.",cr,lf
 	dc.b	"Written by Joseph Zatarski",cr,lf
 	dc.b	"Copyright 2014,2015",cr,lf
-	dc.b	"Version 0",cr,lf,0
+	dc.b	"Version 1",cr,lf,0
 	
 	align 1
 
