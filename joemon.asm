@@ -676,6 +676,8 @@ gets:
 	tst.l	d2	; check if we have any characters to delete
 	beq	.next_char
 
+	jsr	putc	; echo the delete or backspace char
+
 	subq.l	#1,d2	; decrement character counter
 	suba	#1,a0	; move pointer back one character
 
