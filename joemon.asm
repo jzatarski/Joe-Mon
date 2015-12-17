@@ -717,6 +717,11 @@ ver:
 
 .ver_string	dc.b	"Joe-Mon",cr,lf
 	dc.b	"A Machine Language Monitor written for the Beckman DU600 spectrophotometer and other 68K based machines.",cr,lf
+
+	ifd	ram_version
+	dc.b	"RAM version",cr,lf
+	endif
+
 	dc.b	"Written by Joseph Zatarski",cr,lf
 	dc.b	"Copyright 2014,2015",cr,lf
 	dc.b	"Version 1",cr,lf,0
