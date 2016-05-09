@@ -7,7 +7,7 @@
 ; Copyright 2014,2015 Joe Zatarski
 ; email joe.zatarski@gmail.com
 
-; TODO: put GPL notice here
+; This software is licensed under the GPL. See license.txt for more details
 
 ; PORTING:
 ; setup exception vector table to suit your particular system
@@ -63,6 +63,9 @@ lf	equ	$A
 esc	equ	$1B
 bs	equ	$8	; backspace character
 del	equ	$7F	; some terminals use delete in place of backspace
+
+; CCR bit set (OR) masks
+carry_flag	equ	%1
 
 	include "CPU.EQU"
 	include "MISC.EQU"
@@ -521,28 +524,26 @@ prompt_loop:	; loop which accepts and interprets monitor commands
 	move.l	#input_buf_len,d1
 	jsr	gets
 	
-	movea.l	#cmd_table,a0	; point to start of command table
+	movea.l	#cmd_table,a2	; point to start of command table
 
 .cmd_table_loop
-	movea.l	(a0),a1	; point to command string from the table entry
+	movea.l	(a2),a1	; point to command string from the table entry
 
 	tst.l	a1	; check the address
 	beq	.no_match	; null pointer means end of the list, we don't have a match
 
-	movea.l	#input_buff,a2	; point to the users command input
+	movea.l	#input_buff,a0	; point to the user command input
 
 .next_char
 	move.b	(a1)+,d0	; get a character from the table
-	move.b	(a2)+,d1	; get a character from the user input
+	move.b	(a0)+,d1	; get a character from the user input
 
 	tst.b	d0	; if we're at a null in the string from the table
 	beq	.string_end	; then we're almost done with the comparison
 
-	cmp.b	#('a'-1),d1 ; check if user input is lowercase and convert to uppercase
-	bls	.not_lowercase
-	cmp.b	#('z'),d1
-	bhi	.not_lowercase
-
+	cmp.b	lowercasebound,d1	; check if user input is lowercase and convert to uppercase
+	bcs	.not_lowercase
+	
 	bclr	#5,d1	; clearing bit 5 converts from lowercase to uppercase
 
 .not_lowercase
@@ -557,10 +558,10 @@ prompt_loop:	; loop which accepts and interprets monitor commands
 	beq	.match	; if it's null, then it matches
 	cmp.b	#(' '),d1
 	beq	.match	; if it's space, then it's also a match
-	jmp	.next_entry	; otherwise, we move on to the next entry	
+	;jmp	.next_entry	; otherwise, we move on to the next entry	
 
 .next_entry
-	addq.l	#8,a0		; increment to next entry in table
+	addq.l	#8,a2	; increment to next entry in table
 	jmp	.cmd_table_loop
 
 .no_match
@@ -569,8 +570,38 @@ prompt_loop:	; loop which accepts and interprets monitor commands
 	jmp	prompt_loop
 
 .match
-	move.l	(4,a0),a0	; get 4 past a0, which is the function pointer
-	jsr	(a0)		; jump to the command's function
+; pass two arguments to the command, a pointer to an array of pointers to arguments (*argv[]) in a6, and an argument count (argc) in d7
+; command routine should *not* destroy d7, as it is used to restore the stack
+	movea.l	#input_buff,a3	; use a3 as pointer to input buffer
+.find_end
+	tst.b	(a3)+
+	bne	.find_end	; loop until a3 points just past the end of the command string
+	
+	moveq.l	#1,d7	; we will add one more argument than we actually count in .new_arg
+	
+.loop
+	cmpi.b	#' ',-(a3)	; check if current character in command string is space
+	beq	.new_arg	; if it is, then we are at the start of a new argument
+	cmpa.l	#input_buff,a3
+	beq	.end_cmd	; if we are back at the beginning, then we are done looking for args
+	
+	jmp	.loop	; otherwise, move on to next character
+	
+.new_arg
+	clr.b	(a3)	; change space to null to end individual argument
+	pea	(1,a3)	; push address of argument
+	addq.l	#1,d7	; one more arg
+	jmp	.loop	; go look for more args
+	
+.end_cmd
+	pea	input_buff	; input buffer beginning is the first arg
+	movea.l	a7,a6	; stack pointer is now at address of argv[]
+	
+	move.l	(4,a2),a1	; get 4 past a2, which is the function pointer for the command
+	jsr	(a1)		; jump to the command's function
+	
+	lea	(0,a7,d7.l*4),a7	; restore stack
+
 	jmp	prompt_loop
 
 .prompt
@@ -601,6 +632,7 @@ init_console:
 clr_screen:
 	; Clears the screen, customize for your terminal, or don't use it
 	; ^[[2J is the ECMA-48 control sequence to clear the whole screen
+	; ^[H is the ECMA-48 control sequence to home the cursor
 	; trashes a0
 	; calls puts, which trashes other stuff
 	movea.l	#.escapesequence,a0
@@ -639,9 +671,9 @@ gets:
 	; backspace (^H) deletes previous character as does delete
 	; ignores characters with ascii value of less than #$20 except newline and BS
 	; echos characters as they are typed
-	; a0 holds pointer to buffer
+	; a0 passes pointer to buffer
 	; d0 gets trashed
-	; d1 holds buffer length (long)
+	; d1 passes buffer length (long)
 	; d2 holds current character count
 	; 0 must not be passed as the buffer length, or it will be interpreted as 2^32
 	; calls getc which trashes other stuff (d0)
@@ -723,8 +755,8 @@ ver:
 	endif
 
 	dc.b	"Written by Joseph Zatarski",cr,lf
-	dc.b	"Copyright 2014,2015",cr,lf
-	dc.b	"Version 1",cr,lf,0
+	dc.b	"Copyright 2014-2016",cr,lf
+	dc.b	"Version 2",cr,lf,0
 	
 	align 1
 
@@ -901,10 +933,10 @@ get_hex_byte:
 	move.b	d0,d1
 	jsr	getc
 
-	cmp2.b	.digitbound,d0
+	cmp2.b	digitbound,d0
 	bcc	.d0_digit	; if it's within the digit bounds, it's a numeral
 
-	cmp2.b	.letterbound,d0
+	cmp2.b	hexletterbound,d0
 	bcs	.badchar	; if it's out of bounds, it's not a letter or a numeral
 
 	sub.b	#('A'-10),d0	; convert A-F to 10-15
@@ -914,10 +946,10 @@ get_hex_byte:
 	sub.b	#'0',d0	; convert chars 0-9 to numbers 0-9
 
 .d1_conv
-	cmp2.b	.digitbound,d1
+	cmp2.b	digitbound,d1
 	bcc	.d1_digit	; in bounds? then numeral
 
-	cmp2.b	.letterbound,d1
+	cmp2.b	hexletterbound,d1
 	bcs	.badchar	; out of bounds? bad hex digit
 
 	sub.b	#('A'-10),d1	; convert A-F to 10-15
@@ -935,24 +967,125 @@ get_hex_byte:
 .badchar	; the branches to here are bcs, so we exit with carry set if we go here
 	rts
 
-.digitbound
-	dc.b	'0','9'	; lower and upper bound for digit
+jump:
+	; takes one argument:
+	; address to jump to
+	; array of argument pointers passed by address in a6
+	; arg count passed in d7
+	
+	cmpi.l	#2,d7	; check if we have right number of args
+	bne	.wrong_args
+	
+	movea.l	(4,a6),a0	; get address of first argument (skipping command string)
+	jsr	string_to_long
+	bcs	.bad_args	; if string_to_long had an issue parsing, report it
+	movea.l	d0,a0	; put address from argument in a0 for the boot address
 
-.letterbound
-	dc.b	'A','F'	; lower and upper bound for letters
+	jmp	(a0)
 
+.wrong_args
+	movea.l #.usage_string,a0
+	jmp	puts	; puts will return for us
+	
+.bad_args
+	movea.l	#.arg_parse_error_string,a0
+	jmp	puts	; puts will return for us
+	
+.usage_string
+	dc.b	"Incorrect number of arguments.",cr,lf
+	dc.b	"Usage: jump <address>",cr,lf
+	dc.b	"address is a hexadecimal address corresponding to the address to boot.",cr,lf,0
+	
+.arg_parse_error_string
+	dc.b	"Error parsing address argument.",cr,lf,0
+	
+	align 1
+	
+boot:	
+	; takes one argument:
+	; address to boot from
+	; array of argument pointers passed by address in a6
+	; arg count passed in d7
+	
+	cmpi.l	#2,d7	; check if we have right number of args (command + 1 argument)
+	bne	.wrong_args
+	
+	movea.l	(4,a6),a0	; get address of first argument (skipping command string)
+	jsr	string_to_long
+	bcs	.bad_args	; if string_to_long had an issue parsing, report it
+	movea.l	d0,a0	; put address from argument in a0 for the boot address
+
+	andi	#%0011111111111111,sr	; clear trace bits
+	movec	a0,vbr	; set vector base register
+	movea.l	(a0),a7	; set supervisor stack register
+	movea.l	(4,a0),a0	; jmp to reset vector
+	jmp	(a0)
+
+.wrong_args
+	movea.l #.usage_string,a0
+	jmp	puts	; puts will return for us
+	
+.bad_args
+	movea.l	#.arg_parse_error_string,a0
+	jmp	puts	; puts will return for us
+	
+.usage_string
+	dc.b	"Incorrect number of arguments.",cr,lf
+	dc.b	"Usage: boot <address>",cr,lf
+	dc.b	"address is a hexadecimal address corresponding to the address to boot.",cr,lf,0
+	
+.arg_parse_error_string
+	dc.b	"Error parsing address argument.",cr,lf,0
+	
 	align 1
 
-jump:
-	jmp	rambase
+string_to_long:
+	; gets a 32 bit number from a string
+	; pass string address in a0
+	; returns number from string in d0
+	; destroys d1
+	; returns with carry set if there's a problem
 
-boot:	
-	andi	#%0011111111111111,sr	; clear trace bits
-	movea.l	#rambase,a0	; set vector base register
-	movec	a0,vbr
-	movea.l	(rambase),a7	; set supervisor stack register
-	movea.l	(rambase+4),a0	; jmp to reset vector
-	jmp	(a0)
+	clr.l	d0	; clear number
+	
+.next_digit
+	move.b	(a0)+,d1	; get character
+	beq	.done	; null means we're done, also carry won't be set here
+	cmp2.b	digitbound,d1	; check if ASCII character is a numeral
+	bcc	.isdigit
+	cmp2.b	lowercasebound,d1	; check if ASCII character is lowercase
+	bcs	.not_lowercase
+	
+	bclr	#5,d1	; change to uppercase
+
+.not_lowercase
+	cmp2.b	hexletterbound,d1	; check if ASCII character is a hex letter
+	bcc	.isletter
+	rts	; if it's not a digit or a letter, then we have encountered a bad hex digit, and we return with carry set
+
+.isdigit
+	sub.b	#'0',d1	; convert ascii 0-9 to numerical 0-9
+	jmp	.addnibble
+	
+.isletter
+	sub.b	#('A'-10),d1	; convert ascii A-F to be numerical 10-15
+	
+.addnibble
+	cmp.l	#$0FFFFFFF,d0	; check if current number is too big to add another nibble
+	bhi	.badnumber
+	
+	asl.l	#4,d0	; make space for new nibble
+	add.b	d1,d0	; put new nibble on right side
+	
+	jmp	.next_digit
+	
+.badnumber
+	ori	#carry_flag,CCR	; set carry and fall through to done
+
+.done
+	rts
+	
+	
 
 hang:
 	; endless loop in event of fatal error
@@ -1039,6 +1172,15 @@ tpue:
 tpuf:
 
 	rte
+	
+digitbound
+	dc.b	'0','9'	; lower and upper bound for digit
+
+hexletterbound
+	dc.b	'A','F'	; lower and upper bound for hex letters
+
+lowercasebound
+	dc.b	'a','z' ; lower and upper bound for lowercase ascii characters
 
 cmd_table:
 ; this table holds one entry per command
