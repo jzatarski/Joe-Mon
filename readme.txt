@@ -5,7 +5,7 @@ Written by Joseph Zatarski
 Copyright 2014-2016
 Version 2
 
-The monitor currently supports 4 commands:
+The monitor currently supports the following commands:
 
 load - downloads a Motorola S-record into RAM.
 
@@ -21,3 +21,5 @@ in the second vector in the vector table. boot takes the address to boot as an
 argument in hexadecimal.
 
 jump - jumps to the address specified as a hexadecimal argument.
+
+regs - displays the values of registers

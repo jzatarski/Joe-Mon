@@ -4,7 +4,7 @@
 ; This is written for use on a 68332 processor, but should be portable to
 ; other 68K archs without too much trouble.
 
-; Copyright 2014,2015 Joe Zatarski
+; Copyright 2014-2016 Joe Zatarski
 ; email joe.zatarski@gmail.com
 
 ; This software is licensed under the GPL. See license.txt for more details
@@ -642,6 +642,8 @@ clr_screen:
 	dc.b	$1B,"[H",$1B,"[2J",0	; NULL terminated string which contains escape sequence
 
 	align 1
+putnl:
+	movea.l	#newline_str,a0
 	
 puts:
 	; Put string
@@ -656,6 +658,9 @@ puts:
 .done:
 	rts
 
+putsp:
+	; outputs a space
+	move.b	#' ',d0
 putc:
 	; Put character
 	; character passed in d0
@@ -1085,8 +1090,102 @@ string_to_long:
 .done
 	rts
 	
+regs:
+	; displays contents of user registers
+	movea.l	#.reg_string_1,a0
+	jsr puts
 	
+	movea.l	#user_data,a1
+	moveq	#1,d4
+.next_line
+	moveq	#7,d3
 
+.next_data
+	move.l	(a1)+,d1
+	jsr	put_long
+	jsr	putsp
+	dbmi	d3,.next_data
+	
+	dbmi	d4,.addr_line
+	jmp	.proc_stat
+	
+.addr_line
+	movea.l	#.reg_string_2,a0
+	jsr	puts
+	jmp	.next_line
+
+.proc_stat
+	movea.l	#.reg_string_3,a0
+	jsr	puts
+	move.l	user_pc,d1
+	jsr	put_long
+	jsr	putsp
+	move.w	user_sr,d1
+	jsr	put_word
+	jsr	putsp
+	move.w	user_sr,d1
+	moveq	#4,d2
+.ccr_loop
+	btst	d2,d1
+	beq	.cleared
+	move.b	#'+',d0
+	jmp	.put
+.cleared
+	move.b	#'-',d0
+.put
+	jsr	putc
+	dbmi	d2,.ccr_loop
+
+	jsr	putnl
+	
+	rts
+
+.reg_string_1
+	dc.b	"D0       D1       D2       D3       D4       D5       D6       D7",cr,lf,0
+
+.reg_string_2
+	dc.b	cr,lf,"A0       A1       A2       A3       A4       A5       A6       A7",cr,lf,0
+	
+.reg_string_3
+	dc.b	cr,lf,"PC       SR   XNZVC",cr,lf,0
+
+	align 1
+	
+put_long:
+	; prints the long contents of d1 in hexadecimal
+	; trashes d0, d2
+	; calls putc
+	moveq	#7,d2
+.loop
+	rol.l	#4,d1	; put most significant nibble where least significant nibble was
+	move.b	d1,d0
+	andi.b	#$F,d0	; get first nibble
+	addi.b	#'0',d0	; convert to ASCII digit
+	cmpi.b	#'9',d0
+	bls	.digit	; if it's not higher than '9' then it's a digit
+	addi.b	#('A'-'9'-1),d0	; converts to ASCII hex letter
+.digit
+	jsr	putc
+	dbmi	d2,.loop
+	rts
+	
+put_word:
+	; prints the word contents of d1 in hexadecimal
+	; trashes d0, d2
+	; calls putc
+	moveq	#3,d2
+.loop
+	rol.w	#4,d1	; put most significant nibble where least significant nibble was
+	move.b	d1,d0
+	andi.b	#$F,d0	; get first nibble
+	addi.b	#'0',d0	; convert to ASCII digit
+	cmpi.b	#'9',d0
+	bls	.digit	; if it's not higher than '9' then it's a digit
+	addi.b	#('A'-'9'-1),d0	; converts to ASCII hex letter
+.digit
+	jsr	putc
+	dbmi	d2,.loop
+	rts
 hang:
 	; endless loop in event of fatal error
 	jmp	hang
@@ -1173,6 +1272,9 @@ tpuf:
 
 	rte
 	
+newline_str
+	dc.b	cr,lf,0
+	
 digitbound
 	dc.b	'0','9'	; lower and upper bound for digit
 
@@ -1181,6 +1283,8 @@ hexletterbound
 
 lowercasebound
 	dc.b	'a','z' ; lower and upper bound for lowercase ascii characters
+	
+	align 1
 
 cmd_table:
 ; this table holds one entry per command
@@ -1199,6 +1303,9 @@ cmd_table:
 	
 	dc.l	boot_cmd_string
 	dc.l	boot
+	
+	dc.l	regs_cmd_string
+	dc.l	regs
 
 	dc.l	0	; null entry ends table
 
@@ -1215,6 +1322,9 @@ jump_cmd_string
 	
 boot_cmd_string
 	dc.b	"BOOT",0
+	
+regs_cmd_string
+	dc.b	"REGS",0
 	
 	align	1
 monitor_end:	; this points just past the end of the monitor's code	
