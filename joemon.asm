@@ -1228,7 +1228,7 @@ exception_parser:
 	move.l	a0,user_sp
 	
 	move.w	(a7),user_sr	; store status register
-	move.w	(2,a7),user_pc	; and store PC
+	move.l	(2,a7),user_pc	; and store PC
 	
 	movea.l	#exception_msg,a0	; get start of exception message pointer table
 	
