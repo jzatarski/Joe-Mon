@@ -19,6 +19,10 @@
 ; to run software in user mode, the monitor creates a fake exception
 ; frame on the stack and runs RTE. the format of this exception frame can
 ; differ slightly between 68K variants.
+; likewise, the exception stack frames for various faults and internally
+; generated exceptions may differ. There is a section where these stack frames
+; are parsed, and this will need to be updated for stack frames which differ
+; from those used on the CPU32
 
 ; if the symbol ram_version is defined, this is used as an indication that
 ; the monitor should be assembled so that it can be downloaded into
@@ -91,7 +95,7 @@ carry_flag	equ	%1
 	dc.l	fline	; line 1111 emulator (for FPU emulation)
 	
 	dc.l	hdwbkpt	; 12 - hardware breakpoint
-	dc.l	coprocv	; coprocessor protocol violation
+	dc.l	res	;dc.l	coprocv	; coprocessor protocol violation - not on CPU32
 	dc.l	formerr
 	dc.l	unint
 	
@@ -135,19 +139,19 @@ carry_flag	equ	%1
 	dc.l	trape
 	dc.l	trapf
 	
-	dc.l	coproc0	; 48
-	dc.l	coproc1
-	dc.l	coproc2
-	dc.l	coproc3
+	dc.l	res	;dc.l	coproc0	; 48
+	dc.l	res	;dc.l	coproc1
+	dc.l	res	;dc.l	coproc2
+	dc.l	res	;dc.l	coproc3
 	
-	dc.l	coproc4	; 52
-	dc.l	coproc5
-	dc.l	coproc6
-	dc.l	coproc7
+	dc.l	res	;dc.l	coproc4	; 52
+	dc.l	res	;dc.l	coproc5
+	dc.l	res	;dc.l	coproc6
+	dc.l	res	;dc.l	coproc7
 	
-	dc.l	coproc8	; 56
-	dc.l	coproc9
-	dc.l	coproca
+	dc.l	res	;dc.l	coproc8	; 56
+	dc.l	res	;dc.l	coproc9
+	dc.l	res	;dc.l	coproca
 	dc.l	res
 	
 	dc.l	res	; 60
@@ -223,10 +227,10 @@ sysinit
 				; in LPSTOP mode, SIM clock is driven by
 				; crystal and VCO is turned off
 				; in LPSTOP mode, CLKOUT is held negated
-	move.b	#0,(SYPCR)	; set SYPCR such that:
+	move.b	#4,(SYPCR)	; set SYPCR such that:
 				; software watchdog disabled
 				; halt monitor disabled
-				; internal bus monitor disabled
+				; internal bus monitor enabled, 64 clock timeout
 	move.w	#$FFE0,(TRAMBAR) ; set TRAMBAR such that:
 				; base address of TPU RAM is $FF E000
 	move.w	#$140,(PITR) 	; set PITR such that:
@@ -989,7 +993,7 @@ jump:
 	jmp	(a0)
 
 .wrong_args
-	movea.l #.usage_string,a0
+	movea.l	#.usage_string,a0
 	jmp	puts	; puts will return for us
 	
 .bad_args
@@ -1027,7 +1031,7 @@ boot:
 	jmp	(a0)
 
 .wrong_args
-	movea.l #.usage_string,a0
+	movea.l	#.usage_string,a0
 	jmp	puts	; puts will return for us
 	
 .bad_args
@@ -1153,39 +1157,41 @@ regs:
 	
 put_long:
 	; prints the long contents of d1 in hexadecimal
-	; trashes d0, d2
-	; calls putc
-	moveq	#7,d2
-.loop
-	rol.l	#4,d1	; put most significant nibble where least significant nibble was
-	move.b	d1,d0
-	andi.b	#$F,d0	; get first nibble
-	addi.b	#'0',d0	; convert to ASCII digit
-	cmpi.b	#'9',d0
-	bls	.digit	; if it's not higher than '9' then it's a digit
-	addi.b	#('A'-'9'-1),d0	; converts to ASCII hex letter
-.digit
-	jsr	putc
-	dbmi	d2,.loop
-	rts
+	; trashes d0
+	; calls put_nibble
+	
+	swap	d1	; put most significant word where least significant word was
+	jsr	put_word	; put word only trashes LSW of d1
+	swap	d1	; put LSW back and fall through to put_word
+
 	
 put_word:
 	; prints the word contents of d1 in hexadecimal
-	; trashes d0, d2
-	; calls putc
-	moveq	#3,d2
-.loop
-	rol.w	#4,d1	; put most significant nibble where least significant nibble was
+	; trashes d0
+	; calls put_nibble
+	
+	rol.w	#8,d1	; put most significant byte where least significant byte was
+	jsr	put_byte	; put byte only trashes low byte of d1
+	rol.w	#8,d1	; put LSB back where it should be and fall through to put_byte
+	
+put_byte:
+	; prints the byte contents of d1 in hexadecimal
+	; trashes d0
+	; calls put_nibble
 	move.b	d1,d0
-	andi.b	#$F,d0	; get first nibble
+	rol.b	#4,d0	; put most significant nibble where least significant nibble was
+	jsr	put_nibble
+	move.b	d1,d0	; this will print the next nibble, by falling through to put_nibble
+	
+put_nibble:
+	; prints low nibble of d0 (destroys d0)
+	andi.b	#$F,d0	; get nibble
 	addi.b	#'0',d0	; convert to ASCII digit
 	cmpi.b	#'9',d0
 	bls	.digit	; if it's not higher than '9' then it's a digit
 	addi.b	#('A'-'9'-1),d0	; converts to ASCII hex letter
 .digit
-	jsr	putc
-	dbmi	d2,.loop
-	rts
+	jmp	putc	; putc will return for us
 hang:
 	; endless loop in event of fatal error
 	jmp	hang
@@ -1198,36 +1204,439 @@ divzero:
 chk:
 trap:
 priv:
-trace:
 aline:
 fline:
 hdwbkpt:
-coprocv:
+;coprocv:
 formerr:
-unint:
 res:
-spurint:
-coproc0:
-coproc1:
-coproc2:
-coproc3:
-coproc4:
-coproc5:
-coproc6:
-coproc7:
-coproc8:
-coproc9:
-coproca:
+;coproc0:
+;coproc1:
+;coproc2:
+;coproc3:
+;coproc4:
+;coproc5:
+;coproc6:
+;coproc7:
+;coproc8:
+;coproc9:
+;coproca:
 
-	movea.l	#.fatal_exception,a0
+exception_parser:
+	movem.l	d0-d7/a0-a6,user_data	; store registers before we destroy them
+	move	usp,a0	; we make an assumption that the faulted software was running in user mode
+	move.l	a0,user_sp
+	
+	move.w	(a7),user_sr	; store status register
+	move.w	(2,a7),user_pc	; and store PC
+	
+	movea.l	#exception_msg,a0	; get start of exception message pointer table
+	
+	move.w	(6,a7),d0	; get vector offset from stack frame
+	andi.w	#$0FFF,d0	; clear format code, we just want the offset
+	
+	cmpi.w	#($F*4),d0	; check if vector is 15 or less
+	bhi	.unk	; if it's more than vector 15, then it's not something we know
+	
+	movea.l (0,a0,d0.w),a0	; otherwise, get address of message for this vector
+	jmp	.known
+	
+.unk
+	movea.l #res_msg,a0	; default message for unknown vector
+
+.known	
+	jsr	puts	; print description of exception
+
+	movea.l	#.vec_num,a0
+	jsr	puts
+	move.w	(6,a7),d1
+	andi.w	#$0FFF,d1
+	lsr.w	#2,d1	; divide by four to get vector number
+	jsr	put_byte
+	
+	movea.l	#.stack_format,a0
+	jsr	puts
+	
+	move.b	(6,a7),d0	; get byte with format code
+	rol.b	#4,d0	; swap nibbles
+	jsr	put_nibble	; and write format code to screen
+	jsr	putnl	; and put a newline
+	
+	move.b	(6,a7),d0	; get byte with format code again
+	andi.b	#$F0,d0	; get just format code in upper nibble
+	
+	;cmpi.b	#0,d0	; check if it's format 0
+	beq	exception_format_0	; if it is, handle it here
+	
+	cmpi.b	#$20,d0	; check format 2
+	beq	exception_format_2
+	
+	cmpi.b	#$C0,d0	; check format $C
+	beq	exception_format_c
+	
+	movea.l	#.unk_format,a0
+	jsr	puts
+	
+	movea.l	#super_stack,a7	; reset supervisor stack to be at the top
+
+	jmp	prompt_loop	; return back to a prompt
+	
+.vec_num
+	dc.b	cr,lf,"Vector number $",0
+	
+.stack_format
+	dc.b	cr,lf,"Exception stack frame format $",0
+	
+.unk_format
+	dc.b	"Unknown stack frame format.",0
+	
+	align 1
+	
+exception_format_0
+	movea.l	#.pc_message,a0
+	jsr	puts
+	
+	move.l	(2,a7),d1
+	jsr	put_long
+	
+	movea.l	#.sr_message,a0
+	jsr	puts
+	
+	move.w	(a7),d1
+	jsr	put_word
+	jsr	putnl
+	
+	movea.l	#super_stack,a7	; reset supervisor stack to be at the top
+	
+	jsr	regs
+
+	jmp	prompt_loop	; return back to a prompt
+	
+.pc_message
+	dc.b	"Address of faulted instruction: ",0
+	
+.sr_message
+	dc.b	cr,lf,"Status register: ",0
+	
+	align 1
+
+exception_format_2
+	movea.l	#.retpc_message,a0
+	jsr	puts
+	
+	move.l	(2,a7),d1
+	jsr	put_long
+	
+	movea.l	#.faultpc_message,a0
+	jsr	puts
+	
+	move.l	(8,a7),d1
+	jsr	put_long
+	
+	movea.l	#.sr_message,a0
+	jsr	puts
+	
+	move.w	(a7),d1
+	jsr	put_word
+	jsr	putnl
+	
+	movea.l	#super_stack,a7	; reset supervisor stack to be at the top
+	
+	jsr	regs
+
+	jmp	prompt_loop	; return back to a prompt
+	
+.retpc_message
+	dc.b	"Address of next instruction: ",0
+	
+.faultpc_message
+	dc.b	cr,lf,"Address of faulted instruction: ",0
+	
+.sr_message
+	dc.b	cr,lf,"Status register: ",0
+	
+	align 1
+
+exception_format_c
+	move.w	($16,a7),d7	; get the SSW word
+	
+	movea.l	#.ssw_head,a0
+	jsr	puts
+	
+	moveq	#15,d2
+	
+.ssw_loop
+	btst	d2,d7	; check the bit
+	beq	.clear
+	
+	move.b	#'+',d0
+	jmp	.put
+	
+.clear
+	move.b	#'-',d0
+	
+.put
+	jsr	putc
+	
+	dbra	d2,.ssw_loop
+	
+	jsr	putnl
+	
+	btst	#15,d7	; check TP bit
+	beq	.not_tp
+	
+	movea.l	#.tp_msg,a0
+	jmp	.type_put
+	
+.not_tp
+	btst	#14,d7	; check MV bit
+	beq	.not_mv
+	
+	movea.l	#.mv_msg,a0
+	jmp	.type_put
+	
+.not_mv
+	btst	#7,d7	; check IN bit
+	beq	.not_pf
+	
+	movea.l	#.pf_msg,a0
+	jmp	.type_put
+	
+.not_pf
+	movea.l	#.of_msg,a0
+	
+.type_put
+	jsr	puts
+	
+	movea.l	#.fault_addr_msg,a0
+	jsr	puts
+	
+	move.l	($8,a7),d1
+	jsr	put_long
+	jsr	putnl
+	
+	btst	#12,d7	; check TR bit
+	beq	.not_tr
+	
+	movea.l	#.tr_msg,a0
+	jsr	puts
+	
+.not_tr
+	btst	#11,d7	; B1 bit
+	bne	.with_br
+	
+	btst	#10,d7	; B0 bit
+	bne	.with_br
+	jmp	.not_br
+	
+.with_br
+	movea.l	#.br_msg,a0
+	jmp	puts
+	
+.not_br
+	btst	#9,d7	; RR bit
+	beq	.not_rr
+	
+	movea.l	#.rr_msg,a0
+	jsr	puts
+	
+.not_rr
+	jsr	putnl
+
+	btst	#8,d7	; RM bit
+	beq	.not_rm
+	
+	movea.l	#.rm_msg,a0
+	jsr	puts
+	
+.not_rm	
+	movea.l	#.opr_msg,a0
+	jsr	puts
+	
+	btst	#5,d7	; LG bit
+	beq	.not_long
+	
+	movea.l	#.long_msg,a0
+	jmp	.opr_put
+	
+.not_long
+	btst	#4,d7	; this bit is part of SIZ, indicates word
+	beq	.not_word
+	
+	movea.l	#.word_msg,a0
+	jmp	.opr_put
+	
+.not_word
+	movea.l	#.byte_msg,a0
+	
+.opr_put
 	jsr	puts
 
-	jmp	hang
+	
+	btst	#6,d7	; RW bit
+	beq	.not_r
+	
+	movea.l	#.r_msg,a0
+	jmp	.rw_put
+	
+.not_r
+	movea.l	#.w_msg,a0
+	
+.rw_put
+	jsr	puts
+		
+	movea.l	#.siz_msg,a0
+	jsr	puts
+	
+	move.b	d7,d0
+	andi.b	#%11000,d0	; get size
+	bne	.not_4
+	
+	move.b	#4,d0
+	jmp	.siz_put
+	
+.not_4
+	lsr.b	#3,d0
+	
+.siz_put
+	jsr	put_nibble
+	jsr	putnl
+	
+	btst	#15,d7	; check TP bit
+	beq	.not_tp_2
+	
+	movea.l	#.next_pc_msg,a0
+	jsr	puts
+	
+	move.l	($2,a7),d1
+	jsr	put_long
+	jsr	putnl
+	
+	movea.l	#.format_msg,a0
+	jsr	puts
+	
+	move.b	($E,a7),d0
+	asr.b	#4,d0
+	jsr	put_nibble
+	jsr	putnl
+	
+	movea.l	#.pre_sr_msg,a0
+	jsr	puts
+	
+	move.w	($C,a7),d1
+	jsr	put_word
+	jsr	putnl
+	
+.not_tp_2	
+	movea.l	#super_stack,a7	; reset supervisor stack to be at the top
+	
+	jsr	regs
 
-.fatal_exception	dc.b	"A fatal unhandled exception has occurred.",cr,lf,0
+	jmp	prompt_loop	; return back to a prompt
+	
+.ssw_head
+	dc.b	"SSW:         F",cr,lf
+	dc.b	"           S U",cr,lf
+	dc.b	"TM TBBRRIRLI N",cr,lf
+	dc.b	"PV0R10RMNWGZ C",cr,lf,0
+
+.tp_msg
+	dc.b	"Exception occurred during exception processing.",cr,lf,0
+.mv_msg
+	dc.b	"Exception occurred during MOVEM operand transfer.",cr,lf,0
+.pf_msg
+	dc.b	"Exception occurred during instruction prefetch.",cr,lf,0
+.of_msg
+	dc.b	"Exception occurred during normal (non-MOVEM) operand transfer.",cr,lf,0
+.tr_msg
+	dc.b	"Trace pending. ",0
+.br_msg
+	dc.b	"Breakpoint pending. ",0
+.rr_msg
+	dc.b	"Faulted bus cycle was a released write.",0
+.rm_msg
+	dc.b	"Faulted bus cycle was a RMW cycle.",0
+.opr_msg
+	dc.b	"Faulted bus cycle size was a ",0
+.long_msg
+	dc.b	"long",0
+.word_msg
+	dc.b	"word",0
+.byte_msg
+	dc.b	"byte",0
+.r_msg
+	dc.b	" read. ",0
+.w_msg
+	dc.b	" write. ",0
+.siz_msg
+	dc.b	"Number of bytes left in cycle: ",0
+.fault_addr_msg
+	dc.b	"Faulted address: $",0
+.next_pc_msg
+	dc.b	"Next instruction PC: $",0
+.pre_sr_msg
+	dc.b	"Pre-exception status register: $",0
+.format_msg
+	dc.b	"Faulted exception frame format: $",0
+	
+	align 1
+	
+; table of pointers to exception notification messages
+; used only for exceptions which break into the debugger
+exception_msg
+
+	dc.l	res_msg		; reset: shouldn't be possible to get a stack frame for reset
+	dc.l	res_msg		; SSP initial address: shouldn't get an exception at this vector
+	dc.l	berr_msg	; bus error
+	dc.l	aerr_msg	; address error
+	
+	dc.l	illinst_msg	; illegal instruction
+	dc.l	divzero_msg	; division by zero
+	dc.l	chk_msg		; CHK, CHK2
+	dc.l	trap_msg	; TRAPV, TRAPcc
+	
+	dc.l	priv_msg	; priviledge violation
+	dc.l	res_msg		; trace is not handled here (yet, maybe it will be)
+	dc.l	aline_msg	; A-line instruction
+	dc.l	fline_msg	; F-line instruction
+
+	dc.l	hdwbkpt_msg	; hardware breakpoint
+	dc.l	res_msg		; coproc protocol violation (not used on CPU32)
+	dc.l	formerr_msg	; format error
+	dc.l	res_msg		; uninitialized interrupt, not handled here
+
+; everything beyond here (last vector is 15) is not handled here
+
+	
+res_msg		dc.b	"An unknown exception has occurred.",0
+	
+berr_msg	dc.b	"A bus error exception has occurred.",0
+
+aerr_msg	dc.b	"An address error exception has occurred.",0
+
+illinst_msg	dc.b	"An illegal instruction exception has occurred.",0
+
+divzero_msg	dc.b	"A division by zero exception has occurred.",0
+
+chk_msg		dc.b	"A CHK or CHK2 exception has occurred.",0
+
+trap_msg	dc.b	"A TRAPcc or TRAPV exception has occurred.",0
+
+priv_msg	dc.b	"A priviledge violation exception has occurred.",0
+
+aline_msg	dc.b	"An unimplemented A-line instruction exception has occurred.",0
+
+fline_msg	dc.b	"An unimplemented F-line instruction exception has occurred.",0
+
+hdwbkpt_msg	dc.b	"A hardware breakpoint exception has occurred.",0
+
+formerr_msg	dc.b	"A format error exception has occurred.",0
 	align	1
 
 ; dummy exception routine to at least make everything compile
+spurint:
+unint:
+trace:
 psu_irq:
 pp_irq:
 rtc_irq:
@@ -1269,7 +1678,6 @@ tpuc:
 tpud:
 tpue:
 tpuf:
-
 	rte
 	
 newline_str
@@ -1285,7 +1693,13 @@ lowercasebound
 	dc.b	'a','z' ; lower and upper bound for lowercase ascii characters
 	
 	align 1
-
+;test:
+;	movea.l #berr_exc,a0
+;	movec	a0,vbr
+;	
+;	trap	#0	; should BERR during exception processing
+;	rts
+	
 cmd_table:
 ; this table holds one entry per command
 ; each entry consists first of a pointer to a string of the command
@@ -1306,6 +1720,9 @@ cmd_table:
 	
 	dc.l	regs_cmd_string
 	dc.l	regs
+	
+;	dc.l	test_cmd_string
+;	dc.l	test
 
 	dc.l	0	; null entry ends table
 
@@ -1326,11 +1743,21 @@ boot_cmd_string
 regs_cmd_string
 	dc.b	"REGS",0
 	
+;test_cmd_string
+;	dc.b	"TEST",0
+	
 	align	1
 monitor_end:	; this points just past the end of the monitor's code	
 
 input_buf_len	equ	32
 
+;	org	rombase+$100000-$C
+;berr_exc:	; table to specifically cause a BERR during exception processing (more specifically, during vector fetch)
+;	dc.l	0	; fake initial SSP
+;	dc.l	0	; fake initial IP
+;	dc.l	berr	; berr vector
+;	; everything past this point is in a region which should bus fault on access if the bus monitor is enabled.
+	
 	offset mon_ram
 	; all of the monitor variables go here
 mon_pointer	ds.l	1	; holds address where monitor is currently looking
@@ -1338,6 +1765,6 @@ user_data	ds.l	8	; d0-d7
 user_addr	ds.l	7	; a0-a6
 user_sp		ds.l	1	; a7
 user_sr		ds.w	1	; user status register
-user_pc		ds.w	1	; user PC
+user_pc		ds.l	1	; user PC
 input_buff	ds.b	input_buf_len	; used as an input buffer
 mon_ram_end:
