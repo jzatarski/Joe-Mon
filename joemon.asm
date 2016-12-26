@@ -519,6 +519,8 @@ warmstart:
 	jsr	clr_screen
 
 	jsr	init_mon_ram
+	
+	jsr	ver	; sign on message
 
 prompt_loop:	; loop which accepts and interprets monitor commands
 	movea.l	#.prompt,a0	; print the prompt
@@ -617,19 +619,19 @@ prompt_loop:	; loop which accepts and interprets monitor commands
 	align 1
 
 init_console:
-	move.b	#%00011010,(DUART1+DUART_CRA)	; resets pointer to MR1A and disables Tx and Rx
-	move.b	#0,(DUART1+DUART_CRA)	; removes command from register
+	move.b	#%00011010,(DUART0+DUART_CRA)	; resets pointer to MR1A and disables Tx and Rx
+	move.b	#0,(DUART0+DUART_CRA)	; removes command from register
 
-	move.b	#%11010011,(DUART1+DUART_MRA)	; receiver controls RTS, Rx IRQ on FFULL, char error mode, no parity, 8 bits/char
-	move.b	#%00000111,(DUART1+DUART_MRA)	; normal channel mode, no Tx RTS control, no CTS, 1 stop bit
+	move.b	#%11010011,(DUART0+DUART_MRA)	; receiver controls RTS, Rx IRQ on FFULL, char error mode, no parity, 8 bits/char
+	move.b	#%00000111,(DUART0+DUART_MRA)	; normal channel mode, no Tx RTS control, no CTS, 1 stop bit
 
-	move.b	#%00000000,(DUART1+DUART_ACR)	; baud rate set 1, no delta IP interupts
+	move.b	#%00000000,(DUART0+DUART_ACR)	; baud rate set 1, no delta IP interupts
 
-	move.b	#$BB,(DUART1+DUART_CSRA)	; 9600 baud
+	move.b	#$BB,(DUART0+DUART_CSRA)	; 9600 baud
 
-	move.b	#0,(DUART1+DUART_IMR)	; disable interupts
+	move.b	#0,(DUART0+DUART_IMR)	; disable interrupts
 
-	move.b	#%00000101,(DUART1+DUART_CRA)	; turn on Tx and Rx for channel A
+	move.b	#%00000101,(DUART0+DUART_CRA)	; turn on Tx and Rx for channel A
 
 	rts
 	
@@ -669,9 +671,9 @@ putc:
 	; Put character
 	; character passed in d0
 
-	btst.b	#2,(DUART1+DUART_SRA)	; check TXRDY bit
+	btst.b	#2,(DUART0+DUART_SRA)	; check TXRDY bit
 	beq 	putc	; if TXRDY isn't set, then wait
-	move.b	d0,(DUART1+DUART_THRA)	; send byte
+	move.b	d0,(DUART0+DUART_THRA)	; send byte
 	rts
 	
 gets:
@@ -732,9 +734,16 @@ getc:
 	; waits for a character
 	; returns character in d0
 	
-	btst	#0,(DUART1+DUART_SRA)
+	btst	#0,(DUART0+DUART_SRA)
 	beq	getc
-	move.b	(DUART1+DUART_RHRA),d0
+	move.b	(DUART0+DUART_RHRA),d0
+	rts
+	
+flush_serial:
+	; block until DUART is done sending characters
+	
+	btst	#DUART_SR_TXEMT_BIT,(DUART0+DUART_SRA)
+	beq	flush_serial
 	rts
 	
 init_mon_ram:
@@ -756,7 +765,8 @@ ver:
 	movea.l	#.ver_string,a0	; setup to print version string
 	jmp	puts	; puts will return for us
 
-.ver_string	dc.b	"Joe-Mon",cr,lf
+.ver_string
+	dc.b	"Joe-Mon",cr,lf
 	dc.b	"A Machine Language Monitor written for the Beckman DU600 spectrophotometer and other 68K based machines.",cr,lf
 
 	ifd	ram_version
@@ -1028,6 +1038,9 @@ boot:
 	movec	a0,vbr	; set vector base register
 	movea.l	(a0),a7	; set supervisor stack register
 	movea.l	(4,a0),a0	; jmp to reset vector
+	
+	jsr	flush_serial	; flush DUART before we jump
+	
 	jmp	(a0)
 
 .wrong_args
@@ -1192,6 +1205,780 @@ put_nibble:
 	addi.b	#('A'-'9'-1),d0	; converts to ASCII hex letter
 .digit
 	jmp	putc	; putc will return for us
+	
+disassemble:
+	; attempt to disassemble instruction at PC
+	; later will support disassembling multiple instructions, and at arbitrary addresses
+	; since disassembly is going to get a bit complex, we may use stack-based local variables here
+	; we're going to try just using registers though:
+	; a6 - points to current instruction
+	; d6 - holds instruction word
+	; a0,a1,d0,d1 - scratch registers since they are used to pass parameters to so many things
+	movea.l	user_pc,a6
+	move.l	a6,d1
+	jsr	put_long	; print address
+	
+	movea.l #.addr_suffix,a0
+	jsr	puts
+	
+	move.w	(a6)+,d6
+	move.w	d6,d1
+	jsr	put_word	; print instruction word
+	
+	move.b	#' ',d0
+	jsr	putc
+	
+	andi.w	#$F000,d1	; mask off all but upper 4 bits, which are always part of instruction encoding
+	
+	lsr.w	#8,d1	; have to do 2 shifts because we can only shift up to 8
+	lsr.w	#2,d1	; turn it into an address offset
+	
+	movea.l	#.dis_addr,a0
+	movea.l	(a0,d1.w),a0	; get address of disassembly routine
+	jsr	(a0)
+	move.l	a6,user_pc
+	rts
+	
+.addr_suffix
+	dc.b	": "
+	
+	align 1
+	
+.dis_addr	; list of routines to disassemble each group of instructions
+	dc.l	dis_unk	;0
+	dc.l	dis_group1
+	dc.l	dis_group2
+	dc.l	dis_group3
+	
+	dc.l	dis_unk	;4
+	dc.l	dis_unk
+	dc.l	dis_unk
+	dc.l	dis_unk
+	
+	dc.l	dis_unk	;8
+	dc.l	dis_unk
+	dc.l	dis_unk
+	dc.l	dis_unk
+	
+	dc.l	dis_unk	;C
+	dc.l	dis_unk
+	dc.l	dis_unk
+	dc.l	dis_unk
+	
+dis_group1:
+	move.w	d6,d0	; get instruction
+	andi.w	#%0000000111000000,d0	; mask to check if MOVEA or MOVE
+	cmpi.w	#%0000000001000000,d0	; MOVEA
+	beq	dis_ill	; movea.b not allowed
+	
+dis_group2:
+dis_group3:
+	move.w	d6,d0	; get instruction
+	andi.w	#%0000000111000000,d0	; mask for destination EA mode
+	cmpi.w	#%0000000111000000,d0	; check for mode 7
+	bne	.check_src_ea	; everything else is allowed
+	
+	move.w	d6,d0	; get instruction again
+	andi.w	#%0000110000000000,d0	; (partial) mask for register number
+	bne	dis_ill	; if register in mode 7 is anything other than 0 or 1, then bad mode
+	
+.check_src_ea
+	move.w	d6,d0	; get instruction again
+	andi.w	#%0000000000111000,d0	; mask for source EA mode
+	cmpi.w	#%0000000000111000,d0	; check for mode 7
+	bne	.good_ea
+	
+	move.w	d6,d0	; get instruction again
+	andi.w	#%0000000000000111,d0	; mask for source EA reg
+	cmpi.w	#%0000000000000100,d0	; check to see if valid submode
+	bhi	dis_ill	; if submode greater than 4, illegal
+	
+.good_ea
+
+	movea.l	#.move_msg,a0
+	jsr	puts
+	
+	move.w	d6,d0	; get instruction
+	andi.w	#%0000000111000000,d0	; mask to check if MOVEA or MOVE
+	cmpi.w	#%0000000001000000,d0	; MOVEA
+	bne	.not_a
+	
+	move.b	#'A',d0
+	jsr	putc
+	
+.not_a
+	move.b	#'.',d0
+	jsr	putc
+	
+	btst	#13,d6	; check if move.b
+	bne	.not_byte
+
+	move.b	#'B',d0
+	jsr	putc
+	jmp	.siz_done
+	
+.not_byte
+	btst	#12,d6	; check if move.l
+	bne	.not_long
+	
+	move.b	#'L',d0
+	jsr	putc
+	jmp	.siz_done
+	
+.not_long
+	move.b	#'W',d0	; must be move.w
+	jsr	putc
+
+.siz_done
+
+	move.b	#' ',d0
+	jsr	putc
+	
+	movea.l	a6,a5	; a5 holds address of first set of operands
+	
+	move.w	d6,d3	; get instruction
+	andi.w	#%00111000,d3	; mask for source EA mode
+	lsr.w	#3,d3	; shift into lower bits
+	
+	move.w	d6,d2
+	andi.w	#%00000111,d2	; mask for source EA reg, no need to shift
+	
+	jsr	dis_ea	; decode EA for source
+	
+	swap	d5	; keep old operand bits in upper word
+	
+	move.b	#',',d0
+	jsr	putc
+	
+	movea.l	a6,a4	; a4 holds address of second set of operands
+	
+	move.w	d6,d3	; get instruction
+	andi.w	#%0000000111000000,d3	; mask for dest EA mode
+	lsr.w	#6,d3	; shift into lower bits
+	
+	move.w	d6,d2
+	andi.w	#%0000111000000000,d2	; mask for dest EA reg
+	lsr.w	#8,d2	; shift broken into two
+	lsr.w	#1,d2	; nine times total
+	
+	jsr	dis_ea
+	
+	jsr	putnl
+	
+	swap	d5	; get first set of operand bits
+	
+	cmpa.l	a5,a4	; if no first operands
+	beq	.operands2	; skip printing
+	
+	movea.l	#dis_align_msg,a0	; align the numbers
+	jsr	puts
+	
+.next_operand1
+	btst	#0,d5	; check if operand is word or long
+	beq	.word_operand1
+	
+	move.l	(a5)+,d1
+	jsr	put_long
+	jmp	.check_last1
+	
+.word_operand1
+	move.w	(a5)+,d1
+	jsr	put_word
+
+.check_last1
+	jsr	putsp
+	lsr.w	#1,d5
+	cmpa.l	a5,a4	; check if more operands
+	bne	.next_operand1
+	
+	jsr	putnl
+	
+.operands2
+	swap	d5	; get bits for second set of operands
+	
+	cmpa.l	a6,a4
+	beq	.no_operands	; if equal, no 2nd set of operands
+	
+	movea.l	#dis_align_msg,a0
+	jsr	puts	; align numbers again
+	
+.next_operand2
+	btst	#0,d5	; check if operand is word or long
+	beq	.word_operand2
+	
+	move.l	(a4)+,d1
+	jsr	put_long
+	jmp	.check_last2
+	
+.word_operand2
+	move.w	(a4)+,d1
+	jsr	put_word
+	
+.check_last2
+	jsr	putsp
+	lsr.w	#1,d5
+	cmpa.l	a6,a4	; check if more operands
+	bne	.next_operand2
+	
+	jsr	putnl
+	
+.no_operands
+	
+	rts
+
+.move_msg
+	dc.b	"MOVE",0
+	
+	align 1
+	
+dis_ill:
+	movea.l	#.msg,a0
+	jmp	puts
+	
+.msg
+	dc.b	"ILLEGAL",cr,lf,0
+	
+	align 1
+
+dis_unk:
+	; unknown instruction
+	movea.l	#.msg,a0
+	jmp	puts
+	
+.msg
+	dc.b	"UNK",cr,lf,0
+	
+	align 1
+	
+dis_ea:
+	; disassemble effective address
+	;
+	; a6 still holds address to disassemble, but points to start of operands and extension words
+	; d6 will explicitely not be touched (holds copy of instruction word)
+	; d5.w will return bits corresponding to operand size, 1 bit means long, 0 bit means word
+	; d4.w will eventually pass size
+	; d3.w passes EA mode
+	; d2.w passes EA reg
+	; a1,a0,d1,d0 - scratch/parameter passing
+	
+	movea.l	#.addr,a0
+	movea.l	(a0,d3.w*4),a0
+	jmp	(a0)
+	
+.addr
+	dc.l	dis_ea_000
+	dc.l	dis_ea_001
+	dc.l	dis_ea_010
+	dc.l	dis_ea_011
+	dc.l	dis_ea_100
+	dc.l	dis_ea_101
+	dc.l	dis_ea_110
+	dc.l	dis_ea_111
+	
+dis_ea_000
+	; data register direct mode
+	move.b	#'D',d0
+	jsr	putc
+	
+	move.b	d2,d0
+	jmp	put_nibble
+	
+dis_ea_001
+	; address register direct mode
+	move.b	#'A',d0
+	jsr	putc
+	
+	move.b	d2,d0
+	jmp	put_nibble
+	
+dis_ea_010
+	; address register indirect
+	movea.l	#.prefix,a0
+	jsr	puts
+	
+	move.b	d2,d0
+	jsr	put_nibble
+	
+	move.b	#')',d0
+	jmp	putc
+	
+.prefix
+	dc.b	"(A",0
+	
+	align 1
+	
+dis_ea_011
+	; address register indirect with postincrement
+	movea.l	#.prefix,a0
+	jsr	puts
+	
+	move.b	d2,d0
+	jsr	put_nibble
+
+	movea.l	#.suffix,a0
+	jmp	puts
+	
+.prefix
+	dc.b	"(A",0
+
+.suffix
+	dc.b	")+",0
+	
+	align 1
+	
+dis_ea_100
+	; address register indirect with predecrement
+	movea.l	#.prefix,a0
+	jsr	puts
+	
+	move.b	d2,d0
+	jsr	put_nibble
+	
+	move.b	#')',d0
+	jmp	putc
+	
+.prefix
+	dc.b	"-(A",0
+	
+	align 1
+	
+dis_ea_101
+	; address register indirect with displacement (d16)
+	clr.w	d5	; single word operand
+	move.b	#'(',d0
+	jsr	putc
+	
+	move.w	(a6)+,d1
+	jsr	put_d16
+	
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	move.b	d2,d0
+	jsr	put_nibble
+	
+	move.b	#')',d0
+	jmp	putc
+	
+.msg
+	dc.b	",A",0
+	
+	align 1
+	
+dis_ea_110
+	; (bd,An,Xn.SIZ*SCALE) modes (and similar variants)
+	; also handles PC variants (mode 111)
+	move.b	#'(',d0
+	jsr	putc
+	
+	btst.b	#0,(a6)	; check full or brief extension word
+	bne	dis_ea_110f	; call for full format extension word
+	
+	move.w	(a6)+,d4	; get brief extension word
+	
+	move.b	d4,d1	; get displacement byte
+	bpl	.pos_disp	; jump if positive
+	
+	move.b	#'-',d0	; displacement is negative
+	jsr	putc
+	
+	neg.b	d1	; negate to get magnitude
+	
+.pos_disp
+	move.b	#'$',d0	; hex value, so print $
+	jsr	putc
+	
+	jsr	put_word	; print displacement
+	
+	move.b	#',',d0
+	jsr	putc
+	
+	cmpi.w	#%111,d3
+	bne	.addr_base
+	
+	movea.l	#.pc_string,a0
+	jsr	puts
+	
+	jmp	.index
+	
+.addr_base
+	move.b	#'A',d0	; next is base register (An)
+	jsr	putc
+	
+	move.b	d2,d0
+	jsr	put_nibble	; An
+	
+	move.b	#',',d0
+	jsr	putc
+	
+.index
+	btst	#15,d4	; check if index in Dn or An
+	beq	.data_index
+	
+	move.b	#'A',d0
+	jsr	putc
+	jmp	.index_num
+	
+.data_index
+	move.b	#'D',d0
+	jsr	putc
+	
+.index_num
+	move.w	d4,d0
+	andi.w	#%0111000000000000,d0	; get index register number
+	lsr.w	#8,d0
+	lsr.w	#4,d0
+	jsr	put_nibble
+	
+	move.b	#'.',d0
+	jsr	putc
+	
+	btst	#11,d4	; check index size (l or w)
+	bne	.long_index
+	
+	move.b	#'W',d0
+	jsr	putc
+	jmp	.index_scale
+	
+.long_index
+	move.b	#'L',d0
+	jsr	putc
+	
+.index_scale
+	move.b	#'*',d0
+	jsr	putc
+	
+	move.w	d4,d1	; convert scale to digit
+	andi.w	#%0000011000000000,d1
+	lsr.w	#8,d1
+	lsr.w	#1,d1
+	
+	move.b	#1,d0
+	lsl	d1,d0
+	jsr	put_nibble
+	
+	move.b	#')',d0
+	jsr	putc
+	
+	clr.w	d5
+	rts
+	
+.pc_string
+	dc.b	"PC,",0
+	
+	align 1
+	
+dis_ea_110f
+	; this one gets a bit complicated, so to refresh and add some:
+	;
+	; a6 still holds address to disassemble, but points to start of operands and extension words
+	; d6 will explicitely not be touched (holds copy of instruction word)
+	; d5.w will return bits corresponding to operand size, 1 bit means long, 0 bit means word
+	; d4.w will hold the extension word. We don't need size for this mode, so we can overwrite it.
+	; d3.w passes EA mode. We're going to reuse this as a bit index into d5.w.
+	;	to retain the EA mode for later use, we'll swap it into the upper word.
+	; d2.w passes EA reg. Once we're done with the register, it will act as a flag. 0 means previous
+	; fields have been empty, non-zero means at least one previous field was used (not suppressed). This
+	; will be set to 1 when a trailing ']' is printed as well. This used used to determine whether
+	; preceding commas should be printed.
+	; a1,a0,d1,d0 - scratch/parameter passing
+	move.w	(a6)+,d4	; get extension longword
+	clr.w	d5	; operand data was a word
+	swap	d3	; lets us save the EA mode
+	move.b	#1,d3	; next bit to modify in d5 will be bit 1
+
+	; begin checking extension format validity. This is all explained one way or another in
+	; the 68000PRM, chapter 2.
+	move.w	d4,d1
+	andi.w	#%0000000000110000,d1	; check some reserved values
+	beq	dis_ea_inv	; if BD SIZE field is 00, that's reserved
+	
+	btst	#3,d4	; this should be 0 according to 68K PRM
+	bne	dis_ea_inv
+	
+	move.w	d4,d1
+	andi.w	#%0000000001000111,d1
+	cmpi.w	#%0000000001000011,d1	; certain indirection modes not allowed with index reg suppressed
+	bhi	dis_ea_inv
+	
+	cmpi.w	#%0000000000000100,d1	; explicitely reserved mode
+	beq	dis_ea_inv
+	
+	; So at this point, we've determined that the extension word seems to be valid
+	
+	andi.w	#%0000000000000111,d1
+	beq	.no_indirect0	; if IS is 000, no extra indirection
+
+	move.b	#'[',d0
+	jsr	putc
+	
+.no_indirect0
+	; checking bd size
+	; we know BD SIZE field isn't 00, since it's reserved
+	; 01 means null displacement
+	btst	#5,d4
+	beq	.null_bd
+	
+	btst	#4,d4
+	beq	.word_bd
+	
+	; long bd
+	move.l	(a6)+,d1
+	jsr	put_d32
+	bset	d3,d5
+	addq	#1,d3
+	
+	move.b	#'.',d0
+	jsr	putc
+	
+	move.b	#'L',d0
+	jsr	putc
+	
+	jmp	.null_bd
+	
+.word_bd
+	move.w	(a6)+,d1
+	jsr	put_d16
+	addq	#1,d3
+	
+	move.b	#'.',d0
+	jsr	putc
+	
+	move.b	#'W',d0
+	jsr	putc
+
+.null_bd
+	btst	#7,d4
+	bne	.base_suppressed
+	
+	btst	#5,d4
+	beq	.no_base_comma	; skip preceding comma
+	
+	move.b	#',',d0
+	jsr	putc
+	
+.no_base_comma
+	swap	d3
+	cmpi.w	#%111,d3	; check PC base mode
+	bne	.addr_base
+	
+	; PC base reg
+	swap	d3
+	movea.l	#.PC_text,a0
+	jsr	puts
+	
+	jmp	.base_not_suppressed
+	
+.addr_base
+	swap	d3
+	move.b	#'A',d0
+	jsr	putc
+	
+	move.w	d2,d0
+	jsr	put_nibble
+	
+	jmp	.base_not_suppressed
+	
+.base_suppressed
+	;check if bd suppressed too, then d2 is 0, otherwise d2 is nonzero (1)
+	btst	#5,d4
+	beq	.empty	; if previous portion of EA is empty (bd and base reg suppressed)
+	
+.base_not_suppressed	; used for when the base isn't suppressed to set d2
+	move.w	#1,d2
+	jmp	.postindex_check
+	
+.empty
+	clr.w	d2
+	
+.postindex_check
+	btst	#2,d4
+	beq	.index	; not postindex mode
+	
+	tst.w	d2
+	bne	.nonzero_postindex
+	
+	move.b	#'0',d0
+	jsr	putc
+	
+.nonzero_postindex
+	move.b	#']',d0
+	jsr	putc
+	
+	move.w	#1,d2
+	
+.index
+	btst	#6,d4
+	bne	.index_suppressed
+	
+	tst.w	d2
+	beq	.no_index_comma	; no previous stuff, so no comma
+	
+	move.b	#',',d0
+	jsr	putc
+	
+.no_index_comma
+	move.w	#1,d2
+	
+	btst	#15,d4
+	bne	.addr_index
+	
+	; data index
+	move.b	#'D',d0
+	jmp	.index_num
+	
+.addr_index
+	move.b	#'A',d0
+	
+.index_num
+	jsr	putc
+	
+	move.w	d4,d0
+	andi.w	#%0111000000000000,d0
+	lsr.w	#8,d0
+	lsr.w	#4,d0
+	jsr	put_nibble
+	
+	move.b	#'.',d0
+	jsr	putc
+	
+	btst	#11,d4
+	bne	.long_index
+	
+	;word index
+	move.b	#'W',d0
+	jmp	.index_scale
+	
+.long_index
+	move.b	#'L',d0
+	
+.index_scale
+	jsr	putc	; finish up size
+	
+	move.b	#'*',d0
+	jsr	putc
+	
+	move.w	d4,d1
+	andi.w	#%0000011000000000,d1
+	move.b	#1,d0
+	lsr	#8,d1
+	lsr	#1,d1
+	lsl	d1,d0
+	jsr	put_nibble
+	
+.index_suppressed
+	move.w	d4,d0
+	andi.w	#%0000000000000111,d0
+	beq	.no_preindex	; 0 is no indirection
+	cmpi.w	#%011,d0
+	bhi	.no_preindex
+	
+	tst.w	d2
+	bne	.not_empty	; check if we need to put an implied 0
+	
+	move.b	#'0',d0	; implied 0
+	jsr	putc
+	move.w	#1,d2
+	
+.not_empty
+	move.b	#']',d0
+	jsr	putc
+	
+.no_preindex
+
+	btst	#1,d4	; check for od
+	beq	.no_od
+	
+	move.b	#',',d0	; *always* a comma before od, due to implied [0]
+	jsr	putc
+	
+	btst	#0,d4	; check od size
+	beq	.word_od
+	
+	; long od
+	move.l	(a6)+,d1
+	jsr	put_d32
+	bset	d3,d5
+	
+	move.b	#'.',d0
+	jsr	putc
+	move.b	#'L',d0
+	jsr	putc
+	
+	jmp	.no_od
+	
+.word_od
+	move.w	(a6)+,d1
+	jsr	put_d16
+	
+	move.b	#'.',d0
+	jsr	putc
+	move.b	#'W',d0
+	jsr	putc
+	
+.no_od
+	move.b	#')',d0
+	jsr	putc
+
+	rts
+	
+.PC_text
+	dc.b	"PC",0
+
+	align 1
+	
+dis_ea_111
+	cmpi.b	#%011,d2
+	beq	dis_ea_110
+	
+	rts
+	
+dis_ea_inv
+	move.l	#.msg,a0
+	jmp	puts
+	
+.msg
+	dc.b	"<inv>",0
+	
+	align 1
+
+	
+dis_align_msg
+	dc.b	"          ",0	; correct number of spaces to align operand printing
+	
+	align 1
+	
+put_d32
+	; displacement in d1
+	tst.l	d1
+	bpl	.pos_disp
+	
+	move.b	#'-',d0
+	jsr	putc
+	neg.l	d1
+	
+.pos_disp
+	move.b	#'$',d0
+	jsr	putc
+	
+	jmp	put_long
+	
+put_d16
+	; displacement in d1
+	tst.w	d1
+	bpl	.pos_disp
+	
+	move.b	#'-',d0
+	jsr	putc
+	neg.w	d1
+	
+.pos_disp
+	move.b	#'$',d0
+	jsr	putc
+	
+	jmp	put_word
+
+	
 hang:
 	; endless loop in event of fatal error
 	jmp	hang
@@ -1282,10 +2069,10 @@ exception_parser:
 	jmp	prompt_loop	; return back to a prompt
 	
 .vec_num
-	dc.b	cr,lf,"Vector number $",0
+	dc.b	cr,lf,"Vector number: ",0
 	
 .stack_format
-	dc.b	cr,lf,"Exception stack frame format $",0
+	dc.b	cr,lf,"Exception stack frame format: ",0
 	
 .unk_format
 	dc.b	"Unknown stack frame format.",0
@@ -1571,13 +2358,13 @@ exception_format_c
 .siz_msg
 	dc.b	"Number of bytes left in cycle: ",0
 .fault_addr_msg
-	dc.b	"Faulted address: $",0
+	dc.b	"Faulted address: ",0
 .next_pc_msg
-	dc.b	"Next instruction PC: $",0
+	dc.b	"Next instruction PC: ",0
 .pre_sr_msg
-	dc.b	"Pre-exception status register: $",0
+	dc.b	"Pre-exception status register: ",0
 .format_msg
-	dc.b	"Faulted exception frame format: $",0
+	dc.b	"Faulted exception frame format: ",0
 	
 	align 1
 	
@@ -1585,8 +2372,8 @@ exception_format_c
 ; used only for exceptions which break into the debugger
 exception_msg
 
-	dc.l	res_msg		; reset: shouldn't be possible to get a stack frame for reset
 	dc.l	res_msg		; SSP initial address: shouldn't get an exception at this vector
+	dc.l	res_msg		; reset: shouldn't be possible to get a stack frame for reset
 	dc.l	berr_msg	; bus error
 	dc.l	aerr_msg	; address error
 	
@@ -1693,7 +2480,9 @@ lowercasebound
 	dc.b	'a','z' ; lower and upper bound for lowercase ascii characters
 	
 	align 1
+
 ;test:
+
 ;	movea.l #berr_exc,a0
 ;	movec	a0,vbr
 ;	
@@ -1721,6 +2510,9 @@ cmd_table:
 	dc.l	regs_cmd_string
 	dc.l	regs
 	
+	dc.l	disassemble_cmd_string
+	dc.l	disassemble
+	
 ;	dc.l	test_cmd_string
 ;	dc.l	test
 
@@ -1742,6 +2534,9 @@ boot_cmd_string
 	
 regs_cmd_string
 	dc.b	"REGS",0
+	
+disassemble_cmd_string
+	dc.b	"D",0 ;ISASSEMBLE",0
 	
 ;test_cmd_string
 ;	dc.b	"TEST",0
@@ -1768,3 +2563,4 @@ user_sr		ds.w	1	; user status register
 user_pc		ds.l	1	; user PC
 input_buff	ds.b	input_buf_len	; used as an input buffer
 mon_ram_end:
+
