@@ -23,3 +23,5 @@ argument in hexadecimal.
 jump - jumps to the address specified as a hexadecimal argument.
 
 regs - displays the values of registers
+
+disassemble - disassembles code. WIP

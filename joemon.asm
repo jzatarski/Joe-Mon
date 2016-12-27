@@ -1343,6 +1343,24 @@ dis_group3:
 	move.w	d6,d2
 	andi.w	#%00000111,d2	; mask for source EA reg, no need to shift
 	
+	btst	#13,d6
+	bne	.not_byte0
+	
+	move.w	#0,d4
+	jmp	.size0
+	
+.not_byte0
+	btst	#12,d6
+	bne	.not_long0
+	
+	move.w	#%10,d4
+	jmp	.size0
+	
+.not_long0
+	move.w	#%01,d4
+	
+.size0
+	
 	jsr	dis_ea	; decode EA for source
 	
 	swap	d5	; keep old operand bits in upper word
@@ -1360,6 +1378,24 @@ dis_group3:
 	andi.w	#%0000111000000000,d2	; mask for dest EA reg
 	lsr.w	#8,d2	; shift broken into two
 	lsr.w	#1,d2	; nine times total
+	
+	btst	#13,d6
+	bne	.not_byte1
+	
+	move.w	#0,d4
+	jmp	.size1
+	
+.not_byte1
+	btst	#12,d6
+	bne	.not_long1
+	
+	move.w	#%10,d4
+	jmp	.size1
+	
+.not_long1
+	move.w	#%01,d4
+	
+.size1
 	
 	jsr	dis_ea
 	
@@ -1456,7 +1492,11 @@ dis_ea:
 	; a6 still holds address to disassemble, but points to start of operands and extension words
 	; d6 will explicitely not be touched (holds copy of instruction word)
 	; d5.w will return bits corresponding to operand size, 1 bit means long, 0 bit means word
-	; d4.w will eventually pass size
+	; d4.w passes size
+	;	encoding is:
+	;	00 - byte
+	;	01 - word
+	;	10 - long
 	; d3.w passes EA mode
 	; d2.w passes EA reg
 	; a1,a0,d1,d0 - scratch/parameter passing
@@ -1551,17 +1591,30 @@ dis_ea_101
 	move.w	(a6)+,d1
 	jsr	put_d16
 	
-	movea.l	#.msg,a0
+	cmpi.w	#%111,d3
+	beq	.pc_base
+	
+	movea.l	#.addr_msg,a0
 	jsr	puts
 	
 	move.b	d2,d0
 	jsr	put_nibble
+	jmp	.suffix
+	
+.pc_base
+	movea.l	#.pc_msg,a0
+	jsr	puts
+	
+.suffix
 	
 	move.b	#')',d0
 	jmp	putc
 	
-.msg
-	dc.b	",A",0
+.addr_msg
+	dc.b	".W,A",0
+	
+.pc_msg
+	dc.b	".W,PC",0
 	
 	align 1
 	
@@ -1674,7 +1727,7 @@ dis_ea_110f
 	; a6 still holds address to disassemble, but points to start of operands and extension words
 	; d6 will explicitely not be touched (holds copy of instruction word)
 	; d5.w will return bits corresponding to operand size, 1 bit means long, 0 bit means word
-	; d4.w will hold the extension word. We don't need size for this mode, so we can overwrite it.
+	; d4.w will hold the extension word.
 	; d3.w passes EA mode. We're going to reuse this as a bit index into d5.w.
 	;	to retain the EA mode for later use, we'll swap it into the upper word.
 	; d2.w passes EA reg. Once we're done with the register, it will act as a flag. 0 means previous
@@ -1928,10 +1981,93 @@ dis_ea_110f
 	align 1
 	
 dis_ea_111
-	cmpi.b	#%011,d2
+	tst.w	d2
+	beq	dis_ea_abs_short
+	
+	cmpi.w	#%001,d2
+	beq	dis_ea_abs_long
+	
+	cmpi.w	#%010,d2
+	beq	dis_ea_101
+	
+	cmpi.w	#%011,d2
 	beq	dis_ea_110
 	
-	rts
+	jmp	dis_ea_imm
+	
+dis_ea_abs_short
+	clr.b	d5
+	
+	movea.l	#.prefix,a0
+	jsr	puts
+	
+	move.w	(a6)+,d1
+	jsr	put_word
+	
+	movea.l	#.suffix,a0
+	jmp	puts
+	
+.prefix
+	dc.b	"($",0
+	
+.suffix
+	dc.b	").W",0
+	
+	align 1
+	
+dis_ea_abs_long
+	move.w	#1,d5
+	
+	movea.l	#.prefix,a0
+	jsr	puts
+	
+	move.l	(a6)+,d1
+	jsr	put_long
+	
+	movea.l	#.suffix,a0
+	jmp	puts
+	
+.prefix
+	dc.b	"($",0
+	
+.suffix
+	dc.b	").L",0
+	
+	align 1
+	
+dis_ea_imm
+	movea.l	#.prefix,a0
+	jsr	puts
+	
+	tst.w	d4
+	bne	.not_byte
+	
+	move.w	(a6)+,d1
+	clr.w	d5
+	
+	jmp	put_byte
+
+.not_byte
+	cmpi.w	#1,d4
+	bne	.not_word
+	
+	move.w	(a6)+,d1
+	clr.w	d5
+	
+	jmp	put_word
+
+.not_word
+	move.l	(a6)+,d1
+	move.w	#1,d5
+	
+	jmp	put_long
+	
+.not
+	
+.prefix
+	dc.b	"#$",0
+	
+	align 1
 	
 dis_ea_inv
 	move.l	#.msg,a0
