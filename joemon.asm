@@ -2631,6 +2631,26 @@ cmd_table:
 ; next there is a pointer to the subroutine for that command
 ; the table ends with an entry that has a null string pointer
 
+
+	dc.l	load_srec_cmd_string_abbr
+	dc.l	load_srec
+
+	dc.l	ver_cmd_string_abbr
+	dc.l	ver
+
+	dc.l	jump_cmd_string_abbr
+	dc.l	jump
+	
+	dc.l	boot_cmd_string_abbr
+	dc.l	boot
+	
+	dc.l	regs_cmd_string_abbr
+	dc.l	regs
+	
+	dc.l	disassemble_cmd_string_abbr
+	dc.l	disassemble
+
+
 	dc.l	load_srec_cmd_string
 	dc.l	load_srec
 
@@ -2659,20 +2679,37 @@ cmd_table:
 load_srec_cmd_string:
 	dc.b	"LOAD",0
 
+load_srec_cmd_string_abbr:
+	dc.b	"L",0
+
+ver_cmd_string_abbr
+	dc.b	"V",0
+	
 ver_cmd_string
 	dc.b	"VER",0
 
+jump_cmd_string_abbr
+	dc.b	"J",0
+	
 jump_cmd_string
 	dc.b	"JUMP",0
-	
+
+boot_cmd_string_abbr
+	dc.b	"B",0
+		
 boot_cmd_string
 	dc.b	"BOOT",0
 	
+regs_cmd_string_abbr
+	dc.b	"R",0
+
 regs_cmd_string
 	dc.b	"REGS",0
 	
+disassemble_cmd_string_abbr
+	dc.b	"D",0
 disassemble_cmd_string
-	dc.b	"D",0 ;ISASSEMBLE",0
+	dc.b	"DISASSEMBLE",0
 	
 ;test_cmd_string
 ;	dc.b	"TEST",0
