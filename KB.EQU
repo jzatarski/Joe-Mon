@@ -1,0 +1,7 @@
+; hardware equates for KB controller
+KB	equ	$F00400
+
+; offsets
+KB_DATA	equ	0
+KB_CMD	equ	1
+KB_STATUS	equ	1

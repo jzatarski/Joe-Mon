@@ -1,0 +1,21 @@
+; hardware equates for the RTC registers
+RTC	equ	$D02000
+
+
+;offsets, taken from Epson 72423 application manual complete with misspellings
+RTC_S1	equ	$0	; 1-second digit register
+RTC_S10	equ	$1	; 10-seconds digit register
+RTC_MI1	equ	$2	; 1-minute digit register
+RTC_MI10 equ	$3	; 10-minute digit register
+RTC_H1	equ	$4	; 1-hour digit register
+RTC_H10	equ	$5	; 10-hours digit register (and AM/PM bit)
+RTC_D1	equ	$6	; 1-day digit register
+RTC_D10	equ	$7	; 10-days digit register
+RTC_MO1	equ	$8	; 1-month digit register
+RTC_MO10 equ	$9	; 10-months digit register
+RTC_Y1	equ	$A	; 1-year digit register
+RTC_Y10	equ	$B	; 10-years digit register
+RTC_W	equ	$C	; Day-of-the-week register
+RTC_CD	equ	$D	; Control register D
+RTC_CE	equ	$E	; Control register E
+RTC_CF	equ	$F	; Control register F

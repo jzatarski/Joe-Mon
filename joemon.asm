@@ -75,6 +75,8 @@ carry_flag	equ	%1
 	include "MISC.EQU"
 	include "PARPORT.EQU"
 	include "SERIAL.EQU"
+	include	"RTC.EQU"
+	include	"KB.EQU"
 
 	org	rombase	; vector table
 	
@@ -235,8 +237,8 @@ sysinit
 				; base address of TPU RAM is $FF E000
 	move.w	#$140,(PITR) 	; set PITR such that:
 				; time period is approximately 1 second
-	move.w	#$540,(PICR)	; set PICR such that:
-				; use IRQ5
+	move.w	#$040,(PICR)	; set PICR such that:
+				; IRQ disabled
 				; vector number #$40
 	move.w	#$35FF,(CSPAR0) ; set CSPAR0 such that:
 				; CS5, CS2, CS1 and CSBOOT are 16 bit ports
@@ -287,8 +289,8 @@ sysinit
 				; QSM regs supervisor only
 				; IARB number for QSM is 10
 	move.w	#0,(QTEST)	; QTEST
-	move.w	#$3050,(QILR)	; set QILR/QIVR for:
-				; QSPI IRQ 6
+	move.w	#$0050,(QILR)	; set QILR/QIVR for:
+				; QSPI IRQ disabled
 				; SCI IRQ disabled
 				; QSM interupt vector #$50
 	move.w	#$300,(SPCR0)	; set SPCR0 so that:
@@ -512,6 +514,12 @@ coldstart:
 	; not much yet, just the console for now
 
 	jsr	init_console
+	
+	jsr	init_rtc
+	
+	jsr	init_pport
+	
+	move.w	#%0010001000000000,SR	; set IRQ mask to IRQ 2 and below
 	
 warmstart:
 	; this is after one-time hardware init
@@ -760,6 +768,16 @@ init_mon_ram:
 	move.w	sr,(user_sr)
 
 	rts
+	
+init_rtc:
+	bset	#0,(RTC+RTC_CE)	; mask interrupts
+	rts
+	
+init_pport
+	tst.w	PPORT	; should clear printer port IRQ
+	rts
+	
+
 
 ver:
 	movea.l	#.ver_string,a0	; setup to print version string
@@ -1035,6 +1053,7 @@ boot:
 	movea.l	d0,a0	; put address from argument in a0 for the boot address
 
 	andi	#%0011111111111111,sr	; clear trace bits
+	ori	#%0000011100000000,sr	; disable interrupts
 	movec	a0,vbr	; set vector base register
 	movea.l	(a0),a7	; set supervisor stack register
 	movea.l	(4,a0),a0	; jmp to reset vector
@@ -2556,16 +2575,25 @@ hdwbkpt_msg	dc.b	"A hardware breakpoint exception has occurred.",0
 formerr_msg	dc.b	"A format error exception has occurred.",0
 	align	1
 
+kbd_irq:
+	; only possible KB controller interrupt is output buffer full:
+	tst.b	(KB+KB_DATA)	; clear output buffer
+	rte
+	
+pp_irq
+	tst.w	PPORT	; clears printer port IRQ
+	rte
+	
 ; dummy exception routine to at least make everything compile
 spurint:
 unint:
 trace:
 psu_irq:
-pp_irq:
+;pp_irq:
 rtc_irq:
 avec4:
 avec5:
-kbd_irq:
+;kbd_irq:
 nmi:
 trap0:
 trap1:
@@ -2619,12 +2647,7 @@ lowercasebound
 
 ;test:
 
-;	movea.l #berr_exc,a0
-;	movec	a0,vbr
-;	
-;	trap	#0	; should BERR during exception processing
-;	rts
-	
+
 cmd_table:
 ; this table holds one entry per command
 ; each entry consists first of a pointer to a string of the command

@@ -1,5 +1,5 @@
 * THIS FILE IS HARDWARE EQUATES FOR THE BOARD
-* PARALELL PORT EQUATES
+* PARALLEL PORT EQUATES
 LEDS	EQU	$D00802	; used to change the LEDs, OR change the parallel port. Specifically, this does NOT clear the parallel port IRQ
 PPORT	EQU	$D00800	; used to change the parallel port output AND clear the parallel port IRQ
 
