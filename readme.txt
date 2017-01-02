@@ -2,7 +2,7 @@ Joe-Mon
 A machine language monitor for the Beckman DU600 photospectrometer and other
 68K architecture platforms.
 Written by Joseph Zatarski
-Copyright 2014-2016
+Copyright 2014-2017
 Version 2
 
 This software is licensed under the GPL. See license.txt for more details.
