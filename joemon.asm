@@ -4,7 +4,7 @@
 ; This is written for use on a 68332 processor, but should be portable to
 ; other 68K archs without too much trouble.
 
-; Copyright 2014-2016 Joe Zatarski
+; Copyright 2014-2017 Joe Zatarski
 ; email joe.zatarski@gmail.com
 
 ; This software is licensed under the GPL. See license.txt for more details
@@ -27,6 +27,7 @@
 ; if the symbol ram_version is defined, this is used as an indication that
 ; the monitor should be assembled so that it can be downloaded into
 ; RAM and tested without having to reburn EPROMs or flash memory ICs
+
 
 	ifnd ram_version
 rambase	equ	$400000	; this is where main RAM starts
@@ -67,6 +68,8 @@ lf	equ	$A
 esc	equ	$1B
 bs	equ	$8	; backspace character
 del	equ	$7F	; some terminals use delete in place of backspace
+xon	equ	$11
+xoff	equ	$13
 
 ; CCR bit set (OR) masks
 carry_flag	equ	%1
@@ -77,7 +80,7 @@ carry_flag	equ	%1
 	include "SERIAL.EQU"
 	include	"RTC.EQU"
 	include	"KB.EQU"
-
+	
 	org	rombase	; vector table
 	
 	dc.l	super_stack	; reset: initial stack pointer
@@ -188,6 +191,9 @@ carry_flag	equ	%1
 	dc.l	tpud
 	dc.l	tpue
 	dc.l	tpuf
+	
+	org	rombase+$200
+	dc.l	duart0_irq	; 128 - DUART1 IRQ
 
 	org	rombase+$400	; just past vector table
 	
@@ -208,6 +214,8 @@ sysinit
 
 ; TODO: there are a couple simple RAM tests here as well, those should be moved
 ; to the main monitor code.
+
+	move.w	#$0000,(LEDS)
 
 	move.w	#$60C8,(SIMCR)	; set SIMCR such that:
 				; CLKOUT pin is driven from an internal	clock
@@ -503,7 +511,7 @@ sram1test:
 
 	endif
 
-	move.w	#$F000,(PPORT)	; show we got past the first part of boot
+;	move.w	#$F000,(PPORT)	; show we got past the first part of boot
 				; ALSO CLEARS PARALLEL PORT IRQ
 
 
@@ -519,7 +527,7 @@ coldstart:
 	
 	jsr	init_pport
 	
-	move.w	#%0010001000000000,SR	; set IRQ mask to IRQ 2 and below
+	move.w	#%0010000100000000,SR	; set IRQ mask to IRQ 1 and below
 	
 warmstart:
 	; this is after one-time hardware init
@@ -627,20 +635,41 @@ prompt_loop:	; loop which accepts and interprets monitor commands
 	align 1
 
 init_console:
+; CALL BEFORE INTERRUPTS ENABLED
 	move.b	#%00011010,(DUART0+DUART_CRA)	; resets pointer to MR1A and disables Tx and Rx
-	move.b	#0,(DUART0+DUART_CRA)	; removes command from register
+	;move.b	#0,(DUART0+DUART_CRA)	; removes command from register, dunno if necessary
+	
+	move.b	#%10000000,(DUART0+DUART_CRA)	; set Rx BRG X=1
+	move.b	#%10100000,(DUART0+DUART_CRA)	; set Tx BRG X=1
 
-	move.b	#%11010011,(DUART0+DUART_MRA)	; receiver controls RTS, Rx IRQ on FFULL, char error mode, no parity, 8 bits/char
+	move.b	#%10010011,(DUART0+DUART_MRA)	; receiver controls RTS (acts as CTS out), Rx IRQ on RxRDY, char error mode, no parity, 8 bits/char
 	move.b	#%00000111,(DUART0+DUART_MRA)	; normal channel mode, no Tx RTS control, no CTS, 1 stop bit
 
 	move.b	#%00000000,(DUART0+DUART_ACR)	; baud rate set 1, no delta IP interupts
 
-	move.b	#$BB,(DUART0+DUART_CSRA)	; 9600 baud
-
-	move.b	#0,(DUART0+DUART_IMR)	; disable interrupts
+	move.b	#$88,(DUART0+DUART_CSRA)	; 115200 baud
+	
+	move.b	#$80,(DUART0+DUART_IVR)	; set interrupt vector
 
 	move.b	#%00000101,(DUART0+DUART_CRA)	; turn on Tx and Rx for channel A
-
+	
+	
+	move.b	#%00001010,(DUART0+DUART_CRB)	; turns off channel B Tx and Rx
+	
+	movea.l	#ser_rx_buff,a0	; initialize the ring buffers
+	
+	move.l	a0,ser_rx_buff_head
+	move.l	a0,ser_rx_buff_tail
+	
+	movea.l	#ser_tx_buff,a0
+	
+	move.l	a0,ser_tx_buff_head
+	move.l	a0,ser_tx_buff_tail
+	
+	clr.b	ser_tx_flow
+	
+	move.b	#%00000010,(DUART0+DUART_IMR)	; RXRDYA interrupt enabled
+	
 	rts
 	
 clr_screen:
@@ -678,10 +707,35 @@ putsp:
 putc:
 	; Put character
 	; character passed in d0
+	
+	;tst.b	ser_tx_flow
+	;bne	putc
 
-	btst.b	#2,(DUART0+DUART_SRA)	; check TXRDY bit
-	beq 	putc	; if TXRDY isn't set, then wait
-	move.b	d0,(DUART0+DUART_THRA)	; send byte
+	;btst.b	#2,(DUART0+DUART_SRA)	; check TXRDY bit
+	;beq 	putc	; if TXRDY isn't set, then wait
+	;move.b	d0,(DUART0+DUART_THRA)	; send byte
+	;rts
+	
+	move.l	a0,-(a7)
+	
+	movea.l	ser_tx_buff_tail,a0
+
+	move.b	d0,(a0)+
+	
+	cmpa.l	#ser_tx_buff_end,a0
+	bne	.tx_buff_full
+	
+	movea.l	#ser_tx_buff,a0
+	
+.tx_buff_full
+	cmpa.l	ser_tx_buff_head,a0
+	beq	.tx_buff_full	; if buffer is full, just wait a bit to update the tail variable
+	
+	move.l	a0,ser_tx_buff_tail
+	
+	move.b	#%00000011,(DUART0+DUART_IMR)
+	
+	move.l	(a7)+,a0
 	rts
 	
 gets:
@@ -742,9 +796,42 @@ getc:
 	; waits for a character
 	; returns character in d0
 	
-	btst	#0,(DUART0+DUART_SRA)
-	beq	getc
-	move.b	(DUART0+DUART_RHRA),d0
+; old polled I/O code
+	
+;	btst	#0,(DUART0+DUART_SRA)
+;	beq	getc
+;	move.b	(DUART0+DUART_RHRA),d0
+
+; now we poll a buffer instead
+
+	movem.l	a0/d1,-(a7)
+
+	movea.l	ser_rx_buff_head,a0
+	
+.wait
+	cmpa.l	ser_rx_buff_tail,a0
+	beq	.wait	; empty buffer
+	
+	move.b	(a0)+,d1
+	cmpa.l	#ser_rx_buff_end,a0
+	bne	.no_wrap
+	
+	movea.l	#ser_rx_buff,a0
+	
+.no_wrap
+	move.l	a0,ser_rx_buff_head
+	
+	move.w	a0,d0
+	sub.b	ser_rx_buff_tail+3,d0
+	cmp.b	#40,d0
+	bne	.no_xon	
+	
+	move.b	#xon,ser_rx_flow
+	move.b	#%00000011,(DUART0+DUART_IMR)
+	
+.no_xon
+	move.b	d1,d0
+	movem.l	(a7)+,a0/d1
 	rts
 	
 flush_serial:
@@ -756,9 +843,9 @@ flush_serial:
 	
 init_mon_ram:
 	lea.l	(mon_ram),a0
-	move.w	#((mon_ram_end-mon_ram-1)/4),d0
+	move.w	#((input_buff-mon_ram)/2-1),d0
 .loop:
-	clr.l	(a0)+
+	clr.w	(a0)+
 	dbra	d0,.loop
 	
 	move.l	#user_stack,user_sp
@@ -792,8 +879,10 @@ ver:
 	endif
 
 	dc.b	"Written by Joseph Zatarski",cr,lf
-	dc.b	"Copyright 2014-2016",cr,lf
-	dc.b	"Version 2",cr,lf,0
+	dc.b	"Copyright 2014-2017",cr,lf
+	dc.b	"Version 2",cr,lf
+	dc.b	cr,lf
+	dc.b	"This free software is licensed under the GPL. If you paid for this software or source, you were probably ripped off.",cr,lf,0
 	
 	align 1
 
@@ -2584,6 +2673,91 @@ pp_irq
 	tst.w	PPORT	; clears printer port IRQ
 	rte
 	
+duart0_irq
+	movem.l	d0/a0,-(a7)
+	
+	btst	#1,(DUART0+DUART_MISR)	; check if RX interrupt
+	beq	.no_rx
+	
+	move.b	(DUART0+DUART_RHRA),d0
+	
+	cmp.b	#xon,d0
+	beq	.rx_xon
+	
+	cmp.b	#xoff,d0
+	beq	.rx_xoff
+	
+	movea.l	ser_rx_buff_tail,a0
+	
+	move.b	d0,(a0)+
+	
+	cmpa.l	#ser_rx_buff_end,a0
+	bne	.no_rx_wrap
+	
+	movea.l	#ser_rx_buff,a0
+	
+.no_rx_wrap
+	cmpa.l	ser_rx_buff_head,a0
+	beq	.full_rx_buff
+	
+	move.l	a0,ser_rx_buff_tail	; save new tail
+	
+.full_rx_buff
+	move.b	ser_rx_buff_tail+3,d0
+	sub.b	ser_rx_buff_head+3,d0
+	cmpi.b	#224,d0
+	bls	.no_rx
+	
+	move.b	#xoff,ser_rx_flow
+	move.b	#%00000011,(DUART0+DUART_IMR)
+	jmp	.no_rx
+	
+.rx_xon
+	clr.b	ser_tx_flow
+	move.b	#%00000011,(DUART0+DUART_IMR)
+	jmp	.no_rx
+	
+.rx_xoff
+	move.b	#-1,ser_tx_flow
+	
+.no_rx
+	btst	#0,(DUART0+DUART_MISR)	; check if TX interrupt
+	beq	.no_tx
+	
+	move.b	ser_rx_flow,d0
+	beq	.no_rx_flow
+	
+	move.b	d0,(DUART0+DUART_THRA)
+	clr.b	ser_rx_flow
+	jmp	.no_tx
+	
+.no_rx_flow	
+	tst.b	ser_tx_flow
+	bne	.empty_tx_buff
+	
+	movea.l	ser_tx_buff_head,a0
+	cmpa.l	ser_tx_buff_tail,a0
+	beq	.empty_tx_buff
+	
+	move.b	(a0)+,(DUART0+DUART_THRA)
+	
+	cmpa.l	#ser_tx_buff_end,a0
+	bne	.no_wrap
+	
+	movea.l	#ser_tx_buff,a0
+	
+.no_wrap
+	move.l	a0,ser_tx_buff_head
+	jmp	.no_tx
+	
+.empty_tx_buff
+	move.b	#%00000010,(DUART0+DUART_IMR)	; turn off TX IRQ if buffer is empty
+	
+.no_tx
+	movem.l	(a7)+,d0/a0
+	
+	rte
+
 ; dummy exception routine to at least make everything compile
 spurint:
 unint:
@@ -2741,13 +2915,6 @@ disassemble_cmd_string
 monitor_end:	; this points just past the end of the monitor's code	
 
 input_buf_len	equ	32
-
-;	org	rombase+$100000-$C
-;berr_exc:	; table to specifically cause a BERR during exception processing (more specifically, during vector fetch)
-;	dc.l	0	; fake initial SSP
-;	dc.l	0	; fake initial IP
-;	dc.l	berr	; berr vector
-;	; everything past this point is in a region which should bus fault on access if the bus monitor is enabled.
 	
 	offset mon_ram
 	; all of the monitor variables go here
@@ -2758,5 +2925,31 @@ user_sp		ds.l	1	; a7
 user_sr		ds.w	1	; user status register
 user_pc		ds.l	1	; user PC
 input_buff	ds.b	input_buf_len	; used as an input buffer
+
+ser_rx_buff	ds.b	256	; serial input FIFO (ring buffer)
+ser_rx_buff_end
+ser_rx_buff_head	ds.l	1	; characters taken from here (pointer)
+ser_rx_buff_tail	ds.l	1	; characters added here (pointer)
+
+ser_tx_buff	ds.b	256	; serial output FIFO
+ser_tx_buff_end
+ser_tx_buff_head	ds.l	1	; characters taken from here (pointer)
+ser_tx_buff_tail	ds.l	1	; characters added here (pointer)
+
+ser_tx_flow	ds.b	1	; non-zero to disable tx
+ser_rx_flow	ds.b	1	; used to pass a single character for high-priority tx (bypasses TX fifo)
+				; this character will be transmitted regardless of tx flow control
+				; tx interrupt must be enabled. This is used for sending xon/xoff
+				; will be sent if non-zero, cleared to 0 after tx
+
 mon_ram_end:
+
+; here we've got some statistics to be reported during assembly:
+
+	printt	"monitor variables start at:"
+	printv	mon_ram
+	printt	"monitor variables end at:"
+	printv	mon_ram_end
+	printt	"size remaining for supervisor stack is:"
+	printv	super_stack-mon_ram_end
 

@@ -22,7 +22,7 @@ DUART_SRA	equ	$1	; Status Register A
 DUART_MISR	equ	$2	; Masked Interupt Status Register
 DUART_RHRA	equ	$3	; Rx Holding Register A
 DUART_IPCR	equ	$4	; Input Port Change Register
-DUART_ISR	equ	$5	; Interupt Status Register
+DUART_ISR	equ	$5	; Interrupt Status Register
 DUART_SRB	equ	$9	; Status Register B
 DUART_RHRB	equ	$B	; Rx Holding Register B
 DUART_IP	equ	$D	; Input Port

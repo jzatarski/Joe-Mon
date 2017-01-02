@@ -5,6 +5,19 @@ Written by Joseph Zatarski
 Copyright 2014-2016
 Version 2
 
+This software is licensed under the GPL. See license.txt for more details.
+
+Note that copyright years in the files pertaining to this software may be
+indicated as a range. For example, 2014-2017 indicates copyright for ALL of the
+years in the range: 2014,2015,2016,2017
+
+Joe-Mon is intended to be written in a somewhat modular way, as far as commands
+go. Each command has an entry in a table with a subroutine address and an
+address to the command string. Arguments are passed to the subroutine for the
+command as an argc (passed in d7) and *argv (passed in a6). Argc (d7) must not
+be modified or must be restored before return since the command parser uses
+this to deallocate memory on the stack.
+
 The monitor currently supports the following commands:
 
 load - downloads a Motorola S-record into RAM.
@@ -31,3 +44,5 @@ abbreviated as r
 
 disassemble - disassembles code. WIP
 abbreviated as d
+
+
