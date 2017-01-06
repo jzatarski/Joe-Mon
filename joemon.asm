@@ -80,6 +80,7 @@ carry_flag	equ	%1
 	include "SERIAL.EQU"
 	include	"RTC.EQU"
 	include	"KB.EQU"
+	include	"ATA.EQU"
 	
 	org	rombase	; vector table
 	
@@ -1342,67 +1343,807 @@ disassemble:
 	lsr.w	#2,d1	; turn it into an address offset
 	
 	movea.l	#.dis_addr,a0
-	movea.l	(a0,d1.w),a0	; get address of disassembly routine
+	movea.l	(a0,d1.w),a0	; get address of disassembly table
+
+.loop	;loop through disassembly table
+	move.w	(a0)+,d0	; get AND mask
+	beq	.match	; if 0, hit function pointer entry
+	
+	and.w	d6,d0	; apply AND mask
+	cmp2.w	(a0),d0	; check the range
+	bcs	.out	; carry set means out of bounds
+	addq.l	#4,a0	; point to inside address
+	movea.l	(a0),a0	; get next entry
+	jmp	.loop
+	
+.out
+	addq.l	#8,a0	; point to next entry
+	jmp	.loop
+	
+.match	; found a match
+	movea.l	(a0),a0	; get the address in a0
 	jsr	(a0)
+	
+.done
 	move.l	a6,user_pc
 	rts
 	
 .addr_suffix
-	dc.b	": "
+	dc.b	": ",0
 	
 	align 1
 	
-.dis_addr	; list of routines to disassemble each group of instructions
-	dc.l	dis_unk	;0
-	dc.l	dis_group1
-	dc.l	dis_group2
-	dc.l	dis_group3
+.dis_addr	; list of tables to disassemble each group of instructions
+	dc.l	dis_table0	;0
+	dc.l	dis_table1	; move.b
+	dc.l	dis_table2	; move.l
+	dc.l	dis_table2	; reuse table two for word size
 	
-	dc.l	dis_unk	;4
-	dc.l	dis_unk
-	dc.l	dis_unk
+	dc.l	dis_table4	;4
+	dc.l	dis_table4
+	dc.l	dis_table4
+	dc.l	dis_table4
+	
+	dc.l	dis_table4	;8
+	dc.l	dis_table4
+	dc.l	dis_table4
+	dc.l	dis_table4
+	
+	dc.l	dis_table4	;C
+	dc.l	dis_table4
+	dc.l	dis_table4
+	dc.l	dis_table4
+	
+; instruction signature decision tree
+; tree of checks to determine instruction
+; (well, not strictly a tree since nothing prevents a node having multiple parents, not to mention this scenario is also a useful one)
+; first word is an AND mask for the instruction word
+; second and third words are _inclusive_ bounds for CMP2. lower bound is followed by the upper bound
+; next comes the 'inside' address (points to next entry if CMP2 indicated inside)
+; afterwards, and last, comes the 'outside' address (points to next entry if CMP2 indicated outside)
+
+; Additionally, if the AND mask is 0, then the entry is a function pointer to a subroutine designed to handle the instruction
+; this entry need only be three words long.
+	
+dis_table0	; group 0 instruction decoding
+	; almost all of these fit into the single EA format, none allow An direct mode, except movep
+	dc.w	%0000000000111000	; filter out An modes
+	dc.w	%0000000000001000	; movep looks like it has An EA
+	dc.w	%0000000000001000
+	dc.l	.movep_node
+	
+	dc.w	%0000000000111111	; filter out some other (invalid) modes while we're at it
+	dc.w	%0000000000111101
+	dc.w	%0000000000111111
+	dc.l	dis_unk_node
+	
+	dc.w	%0000000111000000	; check for btst Dn
+	dc.w	%0000000100000000
+	dc.w	%0000000100000000
+	dc.l	.btst
+	
+	dc.w	%0000111111000000	; check for btst #
+	dc.w	%0000100000000000
+	dc.w	%0000100000000000
+	dc.l	.btst_static
+	
+	dc.w	%0000111111000000	; check for cmpi (checks size field as well)
+	dc.w	%0000110000000000
+	dc.w	%0000110010000000
+	dc.l	.cmpi
+	
+	dc.w	%0000100111000000	; check for cmp2/chk2
+	dc.w	%0000000011000000
+	dc.w	%0000000011000000
+	dc.l	.cmp2chk2
+	
+	dc.w	%0000000000111111	; filter out (d16,PC) and (bd,PC,Xn)
+	dc.w	%0000000000111010
+	dc.w	%0000000000111011
+	dc.l	dis_unk_node
+	
+	dc.w	%0000000011111111	; filter out long-word access to SR register
+	dc.w	%0000000010111100
+	dc.w	%0000000010111100
+	dc.l	dis_unk_node
+	
+	dc.w	%0000111111000000	; ori
+	dc.w	%0000000000000000
+	dc.w	%0000000010000000
+	dc.l	.ori
+	
+	dc.w	%0000111111000000	; andi
+	dc.w	%0000001000000000
+	dc.w	%0000001010000000
+	dc.l	.andi
+	
+	dc.w	%0000111111000000	; eori
+	dc.w	%0000101000000000
+	dc.w	%0000101010000000
+	dc.l	.eori
+	
+	dc.w	%0000000000111111	; filter out immediate mode
+	dc.w	%0000000000111100
+	dc.w	%0000000000111100
+	dc.l	dis_unk_node
+	
+	dc.w	%0000000111000000	; BCHG/BCLR/BSET Dn
+	dc.w	%0000000101000000
+	dc.w	%0000000111000000
+	dc.l	.bxxx
+	
+	dc.w	%0000111111000000	; BCHG/BCLR/BSET #
+	dc.w	%0000100001000000
+	dc.w	%0000100011000000
+	dc.l	.bxxx
+	
+	dc.w	%0000110111000000	; ADDI/SUBI
+	dc.w	%0000010000000000
+	dc.w	%0000010010000000
+	dc.l	.addsubi
+	
+	dc.w	%0000000000111000	; filter out Dn mode
+	dc.w	%0000000000000000
+	dc.w	%0000000000000000
+	dc.l	dis_unk_node
+	
+	dc.w	%0000111111000000	; moves
+	dc.w	%0000111000000000
+	dc.w	%0000111010000000
+	dc.l	.moves
+	
+	dc.w	0
 	dc.l	dis_unk
 	
-	dc.l	dis_unk	;8
-	dc.l	dis_unk
-	dc.l	dis_unk
-	dc.l	dis_unk
+.movep_node
+	dc.w	%0000000100111000	; movep check
+	dc.w	%0000000100001001
+	dc.w	%0000000100000111
+	dc.l	dis_unk_node
 	
-	dc.l	dis_unk	;C
-	dc.l	dis_unk
-	dc.l	dis_unk
-	dc.l	dis_unk
+	dc.w	0
+	dc.l	dis_movep	; movep confirmed
+
+.cmp2chk2
+	dc.w	%0000011000000000	; make sure SIZ is valid
+	dc.w	%0000011000000000
+	dc.w	%0000011000000000
+	dc.l	dis_unk_node
 	
-dis_group1:
-	move.w	d6,d0	; get instruction
-	andi.w	#%0000000111000000,d0	; mask to check if MOVEA or MOVE
-	cmpi.w	#%0000000001000000,d0	; MOVEA
-	beq	dis_ill	; movea.b not allowed
+	dc.w	%0000000000011000	; check for Dn and -(An) which are not allowed
+	dc.w	%0000000000000000
+	dc.w	%0000000000000000
+	dc.l	dis_unk_node
 	
-dis_group2:
-dis_group3:
-	move.w	d6,d0	; get instruction
-	andi.w	#%0000000111000000,d0	; mask for destination EA mode
-	cmpi.w	#%0000000111000000,d0	; check for mode 7
-	bne	.check_src_ea	; everything else is allowed
+	dc.w	%0000000000111000	; check for (An)+ mode
+	dc.w	%0000000000011000
+	dc.w	%0000000000011000
+	dc.l	dis_unk_node
+
+	dc.w	0
+	dc.l	dis_cmp2chk2	; CMP2/CHK2
 	
-	move.w	d6,d0	; get instruction again
-	andi.w	#%0000110000000000,d0	; (partial) mask for register number
-	bne	dis_ill	; if register in mode 7 is anything other than 0 or 1, then bad mode
+.ori
+	dc.w	0
+	dc.l	dis_ori
+	
+.andi
+	dc.w	0
+	dc.l	dis_andi	;dis_andi
+	
+.eori
+	dc.w	0
+	dc.l	dis_eori	;eori
+	
+.btst_static
+	dc.w	%0000000000111111	; filter out immediate mode for ea
+	dc.w	%0000000000111100
+	dc.w	%0000000000111100
+	dc.l	dis_unk_node
+
+.btst
+	dc.w	0
+	dc.l	dis_btst	; BTST
+	
+.cmpi
+	dc.w	%0000000000111111
+	dc.w	%0000000000111100
+	dc.w	%0000000000111100
+	dc.l	dis_unk_node
+	
+	dc.w	0
+	dc.l	dis_cmpi
+	
+.bxxx	; BCHG/BCLR/BSET filtering
+	dc.w	%0000000011000000
+	dc.w	%0000000001000000
+	dc.w	%0000000001000000
+	dc.l	.bchg
+	
+	dc.w	%0000000011000000
+	dc.w	%0000000010000000
+	dc.w	%0000000010000000
+	dc.l	.bclr
+	
+	; fall through to bset
+	
+.bset
+	dc.w	0
+	dc.l	dis_bset	; bset
+	
+.bchg
+	dc.w	0
+	dc.l	dis_bchg	; bchg
+
+.bclr
+	dc.w	0
+	dc.l	dis_bclr	; bclr
+	
+.addsubi
+	dc.w	%0000001000000000
+	dc.w	%0000000000000000
+	dc.w	%0000000000000000
+	dc.l	.subi
+	
+	dc.w	0
+	dc.l	dis_addi	; addi
+	
+.subi
+	dc.w	0
+	dc.l	dis_subi	; subi
+	
+.moves
+	dc.w	0
+	dc.l	dis_moves	; moves
+	
+dis_table1	; table of instruction signatures for group 1 (MOVE.B)
+	dc.w	%0000000111000000	; this and the next filter out An register byte accesses (not allowed)
+	dc.w	%0000000001000000
+	dc.w	%0000000001000000
+	dc.l	dis_unk_node
+
+	dc.w	%0000000000111000
+	dc.w	%0000000000001000
+	dc.w	%0000000000001000
+	dc.l	dis_unk_node	; after here, we've covered all specific cases of move.b
+				; so fall into the table for group 2
+	
+dis_table2	; table of instruction signatures for group 2 (reused for group 3, both MOVE)
+	dc.w	%0000000111000000	; check for mode 7 destination
+	dc.w	%0000000000000000
+	dc.w	%0000000110000000
+	dc.l	.check_src_ea	; go here if not mode 7
+	
+	dc.w	%0000111000000000
+	dc.w	%0000010000000000
+	dc.w	%0000111000000000
+	dc.l	dis_unk_node	; go here if not allowed mode
 	
 .check_src_ea
-	move.w	d6,d0	; get instruction again
-	andi.w	#%0000000000111000,d0	; mask for source EA mode
-	cmpi.w	#%0000000000111000,d0	; check for mode 7
-	bne	.good_ea
+	dc.w	%0000000000111111	; filter out some invalid modes
+	dc.w	%0000000000111101
+	dc.w	%0000000000111111
+	dc.l	dis_unk_node
 	
-	move.w	d6,d0	; get instruction again
-	andi.w	#%0000000000000111,d0	; mask for source EA reg
-	cmpi.w	#%0000000000000100,d0	; check to see if valid submode
-	bhi	dis_ill	; if submode greater than 4, illegal
+.dis_move_node
+	dc.w	0
+	dc.l	dis_move	; just pass on to move
 	
-.good_ea
+dis_table4	; table of instructions signatures for group 4
+	
+dis_unk_node	; used a lot, so made it a global label rather than local
+	dc.w	0
+	dc.l	dis_unk
+	
+dis_moves
+	movea.l	#.moves_msg,a0
+	jsr	puts
+	
+	move.w	d6,d4
+	andi.w	#%0000000011000000,d4
+	lsr.w	#6,d4
+	jsr	dis_print_siz
+	
+	jsr	putsp
+	
+	movea.l	a6,a5
+	move.w	(a6)+,d1
+	btst	#11,d1
+	beq	.ea_to_r
+	
+	; register to ea
+	
+	btst	#15,d1
+	beq	.Dn
+	
+	move.b	#'A',d0
+	jmp	.ea
+	
+.Dn
+	move.b	#'D',d0
 
+.ea
+	jsr	putc
+	
+	move.w	d1,d0
+	andi.w	#%0111000000000000,d0
+	rol.w	#4,d0
+	jsr	put_nibble
+	
+	move.b	#',',d0
+	jsr	putc
+	
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	jmp	.done
+	
+.ea_to_r
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	move.b	#',',d0
+	jsr	putc
+	
+	move.w	(a5),d1
+	btst	#15,d1
+	bne	.An
+	
+	move.b	#'D',d0
+	jmp	.reg
+	
+.An
+	move.b	#'A',d0
+	
+.reg
+	jsr	putc
+	
+	move.w	d1,d0
+	andi.w	#%0111000000000000,d0
+	rol.w	#4,d0
+	jsr	put_nibble
+
+.done
+	jsr	putnl
+	
+	movea.l	#dis_align_msg,a0
+	jsr	puts
+	
+	move.w	(a5),d1
+	jsr	put_word
+	
+	jsr	putnl
+	
+	movea.l	a6,a5
+	jsr	dis_print_op
+	
+	rts
+	
+.moves_msg
+	dc.b	"MOVES.",0
+
+	align 1
+
+dis_addi:
+	movea.l	#.addi_msg,a0
+	jsr	puts
+	
+	jmp	dis_bit_logic_imm
+	
+.addi_msg
+	dc.b	"ADDI.",0
+	
+dis_subi:
+	movea.l	#.subi_msg,a0
+	jsr	puts
+	
+	jmp	dis_bit_logic_imm
+	
+.subi_msg
+	dc.b	"SUBI.",0
+	
+dis_cmp2chk2:
+	movea.l	a6,a5
+
+	move.w	(a6)+,d1
+	
+	btst	#11,d1
+	beq	.cmp2
+	
+	movea.l	#.chk2_msg,a0
+	jmp	.siz
+	
+.cmp2
+	movea.l	#.cmp2_msg,a0
+
+.siz
+	jsr	puts
+	
+	move.w	d6,d4
+	andi.w	#%0000011000000000,d4
+	rol.w	#7,d4
+	jsr	dis_print_siz
+	
+	jsr	putsp
+	
+	movea.l	a6,a4
+	
+	jsr	dis_ea_std
+	
+	move.b	#',',d0
+	jsr	putc
+	
+	move.w	(a5),d1
+	btst	#15,d1
+	beq	.Dn
+	
+	move.b	#'A',d0
+	jmp	.num
+	
+.Dn
+	move.b	#'D',d0
+
+.num
+	jsr	putc
+	
+	move.w	d1,d0
+	andi.w	#%0111000000000000,d0
+	rol	#4,d0
+	jsr	put_nibble
+	
+	jsr	putnl
+	
+	movea.l	#dis_align_msg,a0
+	jsr	puts
+	
+	jsr	put_word	; print extension word contents (still in d1)
+	
+	jsr	putnl
+	
+	movea.l	a6,a5
+	jsr	dis_print_op
+	
+	rts
+	
+.chk2_msg
+	dc.b	"CHK2.",0
+
+.cmp2_msg
+	dc.b	"CMP2.",0
+	
+	align 1
+
+dis_cmpi:
+	movea.l	#.cmpi_msg,a0
+	jsr	puts
+	jmp	dis_bit_logic_imm	; works for cmpi too, since immediate mode isn't used for EA
+
+.cmpi_msg
+	dc.b	"CMPI.",0
+	
+dis_btst
+	movea.l	#.btst_msg,a0
+	jsr	puts
+	jmp	dis_bxxx
+	
+.btst_msg
+	dc.b	"BTST ",0
+	
+	align 1
+
+dis_bchg
+	movea.l	#.bchg_msg,a0
+	jsr	puts
+	jmp	dis_bxxx
+	
+.bchg_msg
+	dc.b	"BCHG ",0
+	
+	align 1
+	
+dis_bclr
+	movea.l	#.bclr_msg,a0
+	jsr	puts
+	jmp	dis_bxxx
+	
+.bclr_msg
+	dc.b	"BCLR ",0
+	
+	align 1
+	
+dis_bset
+	movea.l	#.bset_msg,a0
+	jsr	puts
+	jmp	dis_bxxx
+	
+.bset_msg
+	dc.b	"BSET ",0
+	
+	align 1	
+dis_bxxx:	; BTST/BCHG/BCLR/BSET
+	btst	#8,d6
+	beq	.static
+	
+	move.b	#'D',d0
+	jsr	putc
+	
+	move.w	d6,d0
+	andi.w	#%0000111000000000,d0
+	rol.w	#7,d0	; same as shift right 9 times
+	jsr	put_nibble
+	
+	movea.l	a6,a4
+	jmp	.ea
+	
+.static
+	move.b	#'#',d0
+	jsr	putc
+	
+	movea.l	a6,a4
+	clr.w	d5
+	
+	move.w	(a6)+,d1
+	
+	move.w	d6,d0
+	andi.w	#%0000000000111000,d0
+	cmpi.w	#%0000000000000000,d0
+	beq	.dn_ea
+	
+	andi.w	#%111,d1
+	jmp	.bit_num
+	
+.dn_ea
+	andi.w	#%11111,d1
+	
+.bit_num
+	jsr	put_byte
+
+.ea
+	move.b	#',',d0
+	jsr	putc
+	
+	swap	d5	; save these things
+	movea.l	a6,a5
+	
+	clr.w	d4	; if it is immediate (only time size matters) it is a byte
+	
+	jsr	dis_ea_std
+	
+	jsr	putnl
+	
+	swap	d5
+	jsr	dis_print_op
+	
+	swap	d5
+	movea.l	a5,a4
+	movea.l	a6,a5
+	
+	jmp	dis_print_op
+	
+dis_movep:
+	movea.l	#.movep_msg,a0
+	jsr	puts
+	
+	btst	#6,d6
+	beq	.word
+	
+	move.b	#'L',d0
+	jmp	.size
+	
+.word
+	move.b	#'W',d0
+	
+.size
+	jsr	putc
+	
+	jsr	putsp
+	
+	btst	#7,d6
+	beq	.mtor
+	
+	; register to memory
+	move.b	#'D',d0
+	jsr	putc
+	
+	move.w	d6,d0
+	andi.w	#%0000111000000000,d0
+	rol.w	#7,d0	; same as shift right 9 (in this case)
+	jsr	put_nibble
+	
+	movea.l	#.rtom_text_0,a0
+	jsr	puts
+	
+	move.w	(a6),d1
+	jsr	put_d16
+	
+	movea.l	#.rtom_text_1,a0
+	jsr	puts
+	
+	move.w	d6,d0
+	andi.w	#%111,d0
+	jsr	put_nibble
+	
+	move.b	#')',d0
+	jsr	putc
+	
+	jmp	.put_operands
+
+.mtor
+	move.b	#'(',d0
+	jsr	putc
+	
+	move.w	(a6),d1
+	jsr	put_d16
+	
+	movea.l	#.rtom_text_1,a0
+	jsr	puts
+	
+	move.w	d6,d0
+	andi.w	#%111,d0
+	jsr	put_nibble
+	
+	movea.l	#.mtor_text,a0
+	jsr	puts
+	
+	move.w	d6,d0
+	andi.w	#%0000111000000000,d0
+	rol.w	#7,d0	; same as shift right 9 (in this case)
+	jsr	put_nibble
+	
+.put_operands
+	jsr	putnl
+	
+	movea.l	#dis_align_msg,a0	; align the numbers
+	jsr	puts
+	
+	move.w	(a6)+,d1
+	jsr	put_word
+	
+	jmp	putnl
+
+.movep_msg:
+	dc.b	"MOVEP.",0
+	
+.rtom_text_0
+	dc.b	",(",0
+	
+.rtom_text_1
+	dc.b	",A",0
+	
+.mtor_text
+	dc.b	"),D",0
+	
+	align 1
+	
+dis_ori:
+	; ORI
+	movea.l	#.ori_msg,a0
+	jsr	puts
+	jmp	dis_bit_logic_imm
+
+.ori_msg
+	dc.b	"ORI.",0
+	
+	align 1
+	
+dis_andi:
+	; ANDI
+	
+	movea.l	#.andi_msg,a0
+	jsr	puts
+	jmp	dis_bit_logic_imm
+
+.andi_msg
+	dc.b	"ANDI.",0
+
+	align 1
+	
+	
+dis_eori:
+	; EORI
+	
+	movea.l	#.eori_msg,a0
+	jsr	puts
+	jmp	dis_bit_logic_imm
+
+.eori_msg
+	dc.b	"EORI.",0
+
+	align 1
+	
+dis_bit_logic_imm	; immediate bitwise logic functions
+	movea.l	a6,a4	; save for later
+	
+	btst	#7,d6
+	bne	.long
+	
+	clr.w	d5
+	
+	btst	#6,d6
+	bne	.word
+	
+	movea.l	#.byte_msg,a0
+	jsr	puts
+	
+	move.w	(a6)+,d1
+	jsr	put_byte
+	
+	jmp	.ea
+	
+.word
+	movea.l	#.word_msg,a0
+	jsr	puts
+	
+	move.w	(a6)+,d1
+	jsr	put_word
+	
+	jmp	.ea
+	
+.long
+	move.w	#1,d5
+	
+	movea.l	#.long_msg,a0
+	jsr	puts
+	
+	move.l	(a6)+,d1
+	jsr	put_long
+	
+.ea
+	move.b	#',',d0
+	jsr	putc
+	swap	d5
+	
+	movea.l	a6,a5	; save for later
+	
+	move.w	d6,d0
+	andi.w	#%111111,d0
+	cmpi.w	#%111100,d0
+	beq	.sr
+	
+	jsr	dis_ea_std	; don't need size because no immediate mode
+	jmp	.done
+	
+.sr
+	btst	#6,d6	; check for CCR vs SR
+	beq	.ccr
+	
+	movea.l	#.sr_text,a0
+	jsr	puts
+	jmp	.done
+	
+.ccr
+	movea.l	#.ccr_text,a0
+	jsr	puts
+	
+.done
+	jsr	putnl
+	
+	swap	d5
+	jsr	dis_print_op
+	
+	swap	d5
+	movea.l	a5,a4
+	movea.l	a6,a5
+	jmp	dis_print_op
+	
+.byte_msg
+	dc.b	"B #$",0
+	
+.word_msg
+	dc.b	"W #$",0
+	
+.long_msg
+	dc.b	"L #$",0
+	
+.sr_text
+	dc.b	"SR",0
+
+.ccr_text
+	dc.b	"CCR",0
+	
+	align 1
+
+dis_move:
 	movea.l	#.move_msg,a0
 	jsr	puts
 	
@@ -1423,6 +2164,8 @@ dis_group3:
 
 	move.b	#'B',d0
 	jsr	putc
+	
+	clr.w	d4
 	jmp	.siz_done
 	
 .not_byte
@@ -1431,52 +2174,31 @@ dis_group3:
 	
 	move.b	#'L',d0
 	jsr	putc
+	
+	move.w	#%10,d4
 	jmp	.siz_done
 	
 .not_long
 	move.b	#'W',d0	; must be move.w
 	jsr	putc
+	
+	move.w	#%01,d4
 
 .siz_done
 
 	move.b	#' ',d0
 	jsr	putc
 	
-	movea.l	a6,a5	; a5 holds address of first set of operands
+	movea.l	a6,a4	; a5 holds address of first set of operands
 	
-	move.w	d6,d3	; get instruction
-	andi.w	#%00111000,d3	; mask for source EA mode
-	lsr.w	#3,d3	; shift into lower bits
-	
-	move.w	d6,d2
-	andi.w	#%00000111,d2	; mask for source EA reg, no need to shift
-	
-	btst	#13,d6
-	bne	.not_byte0
-	
-	move.w	#0,d4
-	jmp	.size0
-	
-.not_byte0
-	btst	#12,d6
-	bne	.not_long0
-	
-	move.w	#%10,d4
-	jmp	.size0
-	
-.not_long0
-	move.w	#%01,d4
-	
-.size0
-	
-	jsr	dis_ea	; decode EA for source
+	jsr	dis_ea_std
 	
 	swap	d5	; keep old operand bits in upper word
 	
 	move.b	#',',d0
 	jsr	putc
 	
-	movea.l	a6,a4	; a4 holds address of second set of operands
+	movea.l	a6,a5	; a4 holds address of second set of operands
 	
 	move.w	d6,d3	; get instruction
 	andi.w	#%0000000111000000,d3	; mask for dest EA mode
@@ -1484,91 +2206,21 @@ dis_group3:
 	
 	move.w	d6,d2
 	andi.w	#%0000111000000000,d2	; mask for dest EA reg
-	lsr.w	#8,d2	; shift broken into two
-	lsr.w	#1,d2	; nine times total
+	rol.w	#7,d2	; same as shift right 9 times in this case
 	
-	btst	#13,d6
-	bne	.not_byte1
-	
-	move.w	#0,d4
-	jmp	.size1
-	
-.not_byte1
-	btst	#12,d6
-	bne	.not_long1
-	
-	move.w	#%10,d4
-	jmp	.size1
-	
-.not_long1
-	move.w	#%01,d4
-	
-.size1
-	
-	jsr	dis_ea
+	jsr	dis_ea	; don't need to worry about destination size, since size only matters for immediate mode
 	
 	jsr	putnl
 	
 	swap	d5	; get first set of operand bits
 	
-	cmpa.l	a5,a4	; if no first operands
-	beq	.operands2	; skip printing
+	jsr	dis_print_op
 	
-	movea.l	#dis_align_msg,a0	; align the numbers
-	jsr	puts
-	
-.next_operand1
-	btst	#0,d5	; check if operand is word or long
-	beq	.word_operand1
-	
-	move.l	(a5)+,d1
-	jsr	put_long
-	jmp	.check_last1
-	
-.word_operand1
-	move.w	(a5)+,d1
-	jsr	put_word
-
-.check_last1
-	jsr	putsp
-	lsr.w	#1,d5
-	cmpa.l	a5,a4	; check if more operands
-	bne	.next_operand1
-	
-	jsr	putnl
-	
-.operands2
 	swap	d5	; get bits for second set of operands
+	movea.l	a5,a4
+	movea.l	a6,a5
 	
-	cmpa.l	a6,a4
-	beq	.no_operands	; if equal, no 2nd set of operands
-	
-	movea.l	#dis_align_msg,a0
-	jsr	puts	; align numbers again
-	
-.next_operand2
-	btst	#0,d5	; check if operand is word or long
-	beq	.word_operand2
-	
-	move.l	(a4)+,d1
-	jsr	put_long
-	jmp	.check_last2
-	
-.word_operand2
-	move.w	(a4)+,d1
-	jsr	put_word
-	
-.check_last2
-	jsr	putsp
-	lsr.w	#1,d5
-	cmpa.l	a6,a4	; check if more operands
-	bne	.next_operand2
-	
-	jsr	putnl
-	
-.no_operands
-	
-	rts
+	jmp	dis_print_op
 
 .move_msg
 	dc.b	"MOVE",0
@@ -1593,6 +2245,72 @@ dis_unk:
 	dc.b	"UNK",cr,lf,0
 	
 	align 1
+	
+dis_print_siz:
+	; print size character based on d4.w
+	; 00 - byte
+	; 01 - word
+	; 10 - long
+	; 11 - undefined
+	
+	btst	#0,d4
+	beq	.not_word
+	
+	move.b	#'W',d0
+	jmp	putc
+	
+.not_word
+	btst	#1,d4
+	beq	.not_long
+	
+	move.b	#'L',d0
+	jmp	putc
+	
+.not_long
+	move.b	#'B',d0
+	jmp	putc
+	
+dis_print_op:
+	; print operands based on bitfield returned by dis_ea in d5.w, starting address in a4, and ending
+	; address in a5
+	cmpa.l	a4,a5	; if no operands
+	beq	.done	; skip printing
+	
+	movea.l	#dis_align_msg,a0	; align the numbers
+	jsr	puts
+	
+.next_operand
+	btst	#0,d5	; check if operand is word or long
+	beq	.word_operand
+	
+	move.l	(a4)+,d1
+	jsr	put_long
+	jmp	.check_last
+	
+.word_operand
+	move.w	(a4)+,d1
+	jsr	put_word
+
+.check_last
+	jsr	putsp
+	lsr.w	#1,d5
+	cmpa.l	a4,a5	; check if more operands
+	bne	.next_operand
+	
+	jsr	putnl
+	
+.done
+	rts
+	
+dis_ea_std:
+	; assumes ea mode is in bits 3-5 of d6, and ea reg is in bits 0-2 of d6
+	; size must be passed in d4
+	move.w	d6,d3
+	andi.w	#%111000,d3
+	lsr.w	#3,d3
+	
+	move.w	d6,d2
+	andi.w	#%111,d2
 	
 dis_ea:
 	; disassemble effective address
@@ -1843,7 +2561,7 @@ dis_ea_110f
 	; will be set to 1 when a trailing ']' is printed as well. This used used to determine whether
 	; preceding commas should be printed.
 	; a1,a0,d1,d0 - scratch/parameter passing
-	move.w	(a6)+,d4	; get extension longword
+	move.w	(a6)+,d4	; get extension word
 	clr.w	d5	; operand data was a word
 	swap	d3	; lets us save the EA mode
 	move.b	#1,d3	; next bit to modify in d5 will be bit 1
@@ -2104,7 +2822,7 @@ dis_ea_111
 	jmp	dis_ea_imm
 	
 dis_ea_abs_short
-	clr.b	d5
+	clr.w	d5
 	
 	movea.l	#.prefix,a0
 	jsr	puts

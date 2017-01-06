@@ -1,0 +1,12 @@
+ATA0	equ	$B02000
+
+ATA_DATA	equ	$0	; data port
+ATA_ERR	equ	$1	; error register
+ATA_FEAT	equ	$1	; feature register
+ATA_SECT	equ	$2	; sector count
+ATA_LBAL	equ	$3	; LBA low
+ATA_LBAM	equ	$4	; LBA mid
+ATA_LBAH	equ	$5	; LBA high
+ATA_DEV	equ	$6	; device control/select
+ATA_CMD	equ	$7	; command reg
+ATA_STATUS	equ	$7	; status reg
