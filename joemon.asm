@@ -216,8 +216,6 @@ sysinit
 ; TODO: there are a couple simple RAM tests here as well, those should be moved
 ; to the main monitor code.
 
-	move.w	#$0000,(LEDS)
-
 	move.w	#$60C8,(SIMCR)	; set SIMCR such that:
 				; CLKOUT pin is driven from an internal	clock
 				; source
@@ -472,7 +470,8 @@ dramtest:
 	cmp.l	(a0),d1
 	beq.l	.ramgood1	; if the two match, then I guess the RAM passes
 	move.w	#$A000,(LEDS)	; if the ram fails, set some lights to show it
-	jmp	hang		; TODO: add some better handling of bad RAM
+	move.l	a0,ram_test_err
+	jmp	coldstart	; TODO: add some better handling of bad RAM
 
 .ramgood1:
 	not.l	(a0)		; sets RAM back	to what	it was
@@ -480,7 +479,8 @@ dramtest:
 	cmp.l	(a0)+,d1
 	beq.l	.ramgood2	; if the two match, I guess the	ram passes
 	move.w	#$A000,(LEDS)	; if the RAM fails, set some lights to show it
-	jmp	hang
+	move.l	a0,ram_test_err
+	jmp	coldstart
 
 .ramgood2:
 	subi.l	#1,d0		; decrement counter
@@ -496,7 +496,8 @@ sram1test:
 	cmp.l	(a0),d1
 	beq.l	.ramgood1	; if they match	after the NOT, then the	ram location passes
 	move.w	#$5000,(LEDS)	; otherwise, show failure
-	jmp	hang
+	move.l	a0,ram_test_err
+	jmp	coldstart
 
 .ramgood1:				; CODE XREF: sub_C58C-2400j
 	not.l	(a0)		; NOT ram location again
@@ -504,7 +505,8 @@ sram1test:
 	cmp.l	(a0)+,d1
 	beq.l	.ramgood2	; if they match, the RAM passes
 	move.w	#$4000,(LEDS)	; otherwise, show failure
-	jmp	hang
+	move.l	a0,ram_test_err
+	jmp	coldstart
 ; ---------------------------------------------------------------------------
 .ramgood2:				; CODE XREF: sub_C58C-23E8j
 	subi.l	#1,d0		; decrement counter
@@ -669,7 +671,7 @@ init_console:
 	
 	clr.b	ser_tx_flow
 	
-	move.b	#%00000010,(DUART0+DUART_IMR)	; RXRDYA interrupt enabled
+	move.b	#%00000110,(DUART0+DUART_IMR)	; RXRDYA interrupt enabled
 	
 	rts
 	
@@ -734,7 +736,7 @@ putc:
 	
 	move.l	a0,ser_tx_buff_tail
 	
-	move.b	#%00000011,(DUART0+DUART_IMR)
+	move.b	#%00000111,(DUART0+DUART_IMR)
 	
 	move.l	(a7)+,a0
 	rts
@@ -828,7 +830,7 @@ getc:
 	bne	.no_xon	
 	
 	move.b	#xon,ser_rx_flow
-	move.b	#%00000011,(DUART0+DUART_IMR)
+	move.b	#%00000111,(DUART0+DUART_IMR)
 	
 .no_xon
 	move.b	d1,d0
@@ -837,6 +839,8 @@ getc:
 	
 flush_serial:
 	; block until DUART is done sending characters
+	
+	; TODO: also need to wait for TX fifo to be empty
 	
 	btst	#DUART_SR_TXEMT_BIT,(DUART0+DUART_SRA)
 	beq	flush_serial
@@ -1380,19 +1384,19 @@ disassemble:
 	dc.l	dis_table2	; reuse table two for word size
 	
 	dc.l	dis_table4	;4
-	dc.l	dis_table4
-	dc.l	dis_table4
-	dc.l	dis_table4
+	dc.l	dis_tableF
+	dc.l	dis_tableF
+	dc.l	dis_tableF
 	
-	dc.l	dis_table4	;8
-	dc.l	dis_table4
-	dc.l	dis_table4
-	dc.l	dis_table4
+	dc.l	dis_tableF	;8
+	dc.l	dis_tableF
+	dc.l	dis_tableF
+	dc.l	dis_tableF
 	
-	dc.l	dis_table4	;C
-	dc.l	dis_table4
-	dc.l	dis_table4
-	dc.l	dis_table4
+	dc.l	dis_tableF	;C
+	dc.l	dis_tableF
+	dc.l	dis_tableF
+	dc.l	dis_tableF
 	
 ; instruction signature decision tree
 ; tree of checks to determine instruction
@@ -1630,10 +1634,673 @@ dis_table2	; table of instruction signatures for group 2 (reused for group 3, bo
 	dc.l	dis_move	; just pass on to move
 	
 dis_table4	; table of instructions signatures for group 4
+	dc.w	%1111111111111111
+	dc.w	%0100101011111010	; BGND
+	dc.w	%0100101011111010
+	dc.l	.bgnd_node
+	
+	dc.w	%1111111111111111	; ILLEGAL
+	dc.w	%0100101011111100
+	dc.w	%0100101011111100
+	dc.l	.illegal_node
+	
+	dc.w	%1111111111111111	; RESET
+	dc.w	%0100111001110000
+	dc.w	%0100111001110000
+	dc.l	.reset_node
+	
+	dc.w	%1111111111111111
+	dc.w	%0100111001110001
+	dc.w	%0100111001110001
+	dc.l	.nop_node
+	
+	dc.w	%1111111111111111
+	dc.w	%0100111001110010
+	dc.w	%0100111001110010
+	dc.l	.stop_node
+	
+	dc.w	%1111111111111111
+	dc.w	%0100111001110011
+	dc.w	%0100111001110011
+	dc.l	.rte_node
+	
+	dc.w	%1111111111111111
+	dc.w	%0100111001110100
+	dc.w	%0100111001110100
+	dc.l	.rtd_node
+	
+	dc.w	%1111111111111111
+	dc.w	%0100111001110101
+	dc.w	%0100111001110101
+	dc.l	.rts_node
+	
+	dc.w	%1111111111111111
+	dc.w	%0100111001110110
+	dc.w	%0100111001110110
+	dc.l	.trapv_node
+	
+	dc.w	%1111111111111111
+	dc.w	%0100111001110111
+	dc.w	%0100111001110111
+	dc.l	.rtr_node
+	
+	dc.w	%1111111111111000
+	dc.w	%0100100000001000
+	dc.w	%0100100000001000
+	dc.l	.link_long_node
+	
+	dc.w	%1111111111111000
+	dc.w	%0100111001010000
+	dc.w	%0100111001010000
+	dc.l	.link_word_node
+	
+	dc.w	%1111111111111000
+	dc.w	%0100111001011000
+	dc.w	%0100111001011000
+	dc.l	.unlk_node
+	
+	dc.w	%1111111111111000
+	dc.w	%0100100001000000
+	dc.w	%0100100001000000
+	dc.l	.swap_node
+	
+	dc.w	%1111111111111000
+	dc.w	%0100111001101000
+	dc.w	%0100111001101000
+	dc.l	.move_from_usp_node
+	
+	dc.w	%1111111111111000
+	dc.w	%0100111001100000
+	dc.w	%0100111001100000
+	dc.l	.move_to_usp_node
+	
+	dc.w	%1111111111111000
+	dc.w	%0100100001001000
+	dc.w	%0100100001001000
+	dc.l	.bkpt_node
+	
+	dc.w	%1111111111110000
+	dc.w	%0100111001000000
+	dc.w	%0100111001000000
+	dc.l	.trap_node
+	
+	dc.w	%1111111111111111
+	dc.w	%0100111001111010
+	dc.w	%0100111001111010
+	dc.l	.movec_to_general_node
+	
+	dc.w	%1111111111111111
+	dc.w	%0100111001111011
+	dc.w	%0100111001111011
+	dc.l	.movec_to_control_node
+	
+	dc.w	%1111111111111000
+	dc.w	%0100100010000000
+	dc.w	%0100100010000000
+	dc.l	.ext_word_node
+	
+	dc.w	%1111111111111000
+	dc.w	%0100100011000000
+	dc.w	%0100100011000000
+	dc.l	.ext_long_node
+	
+	dc.w	%1111111111111000
+	dc.w	%0100100111000000
+	dc.w	%0100100111000000
+	dc.l	.extb_long_node
+	
+	dc.w	0
+	dc.l	dis_unk
+	
+.ext_long_node
+	dc.w	0
+	dc.l	dis_ext_l
+	
+.ext_word_node
+	dc.w	0
+	dc.l	dis_ext_w
+	
+.extb_long_node
+	dc.w	0
+	dc.l	dis_extb_l
+	
+.movec_to_general_node
+	dc.w	0
+	dc.l	dis_movec_to_Xn
+	
+.movec_to_control_node
+	dc.w	0
+	dc.l	dis_movec_from_Xn
+	
+.trap_node
+	dc.w	0
+	dc.l	dis_trap
+	
+.bkpt_node
+	dc.w	0
+	dc.l	dis_bkpt
+	
+.move_to_usp_node
+	dc.w	0
+	dc.l	dis_move_to_usp
+	
+.move_from_usp_node
+	dc.w	0	; MOVE USP,An
+	dc.l	dis_move_from_usp
+	
+.swap_node
+	dc.w	0	; SWAP
+	dc.l	dis_swap
+	
+.unlk_node
+	dc.w	0	; UNLK
+	dc.l	dis_unlk
+	
+.link_word_node
+	dc.w	0	; LINK.W
+	dc.l	dis_link_word
+	
+.link_long_node
+	dc.w	0	; LINK.L
+	dc.l	dis_link_long
+	
+.rtr_node
+	dc.w	0	; rtr
+	dc.l	dis_rtr
+	
+.trapv_node
+	dc.w	0	; trapv
+	dc.l	dis_trapv
+
+.rts_node
+	dc.w	0	; rts
+	dc.l	dis_rts
+	
+.rtd_node
+	dc.w	0	; rtd
+	dc.l	dis_rtd
+	
+.rte_node
+	dc.w	0	; rte
+	dc.l	dis_rte
+	
+.stop_node
+	dc.w	0	; stop
+	dc.l	dis_stop
+	
+.nop_node
+	dc.w	0	; nop
+	dc.l	dis_nop
+
+.reset_node
+	dc.w	0	; reset
+	dc.l	dis_reset
+	
+.illegal_node
+	dc.w	0	; illegal
+	dc.l	dis_illegal
+	
+.bgnd_node
+	dc.w	0
+	dc.l	dis_bgnd	; bgnd
+	
+dis_tableF
 	
 dis_unk_node	; used a lot, so made it a global label rather than local
 	dc.w	0
 	dc.l	dis_unk
+	
+dis_ext_w
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_Xn
+	
+.msg
+	dc.b	"EXT.W D",0
+	
+	align 1
+	
+dis_ext_l
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_Xn
+	
+.msg
+	dc.b	"EXT.L D",0
+	
+dis_extb_l
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_Xn
+	
+.msg
+	dc.b	"EXTB.L D",0
+	
+	align 1
+	
+dis_movec_to_Xn
+	jsr	dis_movec_msg
+	
+	jsr	dis_movec_Rc
+	
+	move.b	#',',d0
+	jsr	putc
+	
+	jsr	dis_movec_Rn
+	
+	jmp	dis_movec_word2
+	
+dis_movec_from_Xn
+	jsr	dis_movec_msg
+	
+	jsr	dis_movec_Rn
+	
+	move.b	#',',d0
+	jsr	putc
+	
+	jsr	dis_movec_Rc
+	
+	;jmp	dis_movec_word2	; fall through
+	
+dis_movec_word2
+	jsr	putnl
+	
+	movea.l	#dis_align_msg,a0
+	jsr	puts
+
+	move.w	(a6)+,d1
+	jsr	put_word
+	
+	jmp	putnl
+	
+dis_movec_Rc
+	move.w	(a6),d0
+	andi.w	#%0000111111111111,d0
+	
+	beq	.sfc
+	
+	cmpi.w	#$001,d0
+	beq	.dfc
+	
+	cmpi.w	#$002,d0
+	beq	.cacr
+	
+	cmpi.w	#$800,d0
+	beq	.usp
+	
+	cmpi.w	#$801,d0
+	beq	.vbr
+	
+	cmpi.w	#$802,d0
+	beq	.caar
+	
+	cmpi.w	#$803,d0
+	beq	.msp
+	
+	cmpi.w	#$804,d0
+	beq	.isp
+	
+	movea.l	#.unk_msg,a0
+	jmp	.print
+	
+.sfc
+	movea.l	#.sfc_msg,a0
+	jmp	.print
+	
+.dfc
+	movea.l	#.dfc_msg,a0
+	jmp	.print
+	
+.cacr
+	movea.l	#.cacr_msg,a0
+	jmp	.print
+	
+.usp
+	movea.l	#.usp_msg,a0
+	jmp	.print
+	
+.vbr
+	movea.l	#.vbr_msg,a0
+	jmp	.print
+	
+.caar
+	movea.l	#.caar_msg,a0
+	jmp	.print
+	
+.msp
+	movea.l	#.msp_msg,a0
+	jmp	.print
+	
+.isp
+	movea.l	#.isp_msg,a0
+	; fall through
+	
+.print
+	jmp	puts
+	
+.unk_msg
+	dc.b	"<unk>",0
+	
+.sfc_msg
+	dc.b	"SFC",0
+	
+.dfc_msg
+	dc.b	"DFC",0
+	
+.cacr_msg
+	dc.b	"CACR",0
+	
+.usp_msg
+	dc.b	"USP",0
+	
+.vbr_msg
+	dc.b	"VBR",0
+	
+.caar_msg
+	dc.b	"CAAR",0
+	
+.msp_msg
+	dc.b	"MSP",0
+	
+.isp_msg
+	dc.b	"ISP",0
+	
+	align 1
+	
+dis_movec_Rn
+	btst	#8,(a6)
+	beq	.Dn
+	
+	move.b	#'A',d0
+	jmp	.AD_print
+	
+.Dn
+	move.b	#'D',d0
+	
+.AD_print
+	jsr	putc
+	
+	move.b	(a6),d0
+	lsr	#4,d0
+	andi.b	#%00000111,d0
+	jmp	put_nibble
+	
+dis_movec_msg
+	movea.l	#.movec_msg,a0
+	jmp	puts
+	
+.movec_msg
+	dc.b	"MOVEC ",0
+	
+	align 1
+	
+dis_trap
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	move.b	d6,d0
+	jsr	put_nibble
+	
+	jmp	putnl
+	
+.msg
+	dc.b	"TRAP #",0
+	
+	align 1
+	
+dis_bkpt
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_Xn
+	
+.msg
+	dc.b	"BKPT #",0
+	
+	align 1
+	
+dis_move_to_usp
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	move.b	d6,d0
+	andi.b	#7,d0
+	jsr	put_nibble
+	
+	movea.l	#.suffix,a0
+	jmp	puts
+	
+.msg
+	dc.b	"MOVE A",0
+	
+.suffix
+	dc.b	",USP",cr,lf,0
+	
+	align 1
+	
+dis_move_from_usp
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_Xn
+	
+.msg
+	dc.b	"MOVE USP,A",0
+	
+	align 1
+	
+dis_swap
+	movea.l	#.swap_msg,a0
+	jsr	puts
+	
+	jmp	dis_single_Xn
+	
+.swap_msg
+	dc.b	"SWAP D",0
+	
+	align 1
+	
+dis_unlk
+	movea.l	#.unlk_msg,a0
+	jsr	puts
+	
+	jmp	dis_single_Xn
+	
+.unlk_msg
+	dc.b	"UNLK A",0
+	
+	align 1
+	
+dis_single_Xn
+	move.b	d6,d0
+	andi.b	#7,d0
+	jsr	put_nibble
+	
+	jmp	putnl
+	
+dis_link_word
+	movea.l	#.link_word_msg,a0
+	jsr	puts
+	
+	move.b	d6,d0
+	andi.b	#7,d0
+	jsr	put_nibble
+	
+	movea.l	#.middle,a0
+	jsr	puts
+	
+	move.w	(a6),d1
+	jsr	put_d16
+	
+	jsr	putnl
+	
+	movea.l	#dis_align_msg,a0
+	jsr	puts
+	
+	move.w	(a6)+,d1
+	
+	jsr	put_word
+	
+	jmp	putnl
+	
+.link_word_msg
+	dc.b	"LINK.W A",0
+	
+.middle
+	dc.b	",#",0
+	
+	align 1
+	
+dis_link_long
+	movea.l	#.link_long_msg,a0
+	jsr	puts
+	
+	move.b	d6,d0
+	andi.b	#7,d0
+	jsr	put_nibble
+	
+	movea.l	#.separator,a0
+	jsr	puts
+	
+	move.l	(a6),d1
+	jsr	put_d32
+	
+	jsr	putnl
+	
+	movea.l	#dis_align_msg,a0
+	jsr	puts
+	
+	move.l	(a6)+,d1
+	jsr	put_long
+	
+	jmp	putnl
+	
+.link_long_msg
+	dc.b "LINK.L A",0	
+	
+.separator
+	dc.b ",#",0
+	
+	align 1
+	
+dis_rtr
+	movea.l	#.rtr_msg,a0
+	jmp	puts
+	
+.rtr_msg
+	dc.b	"RTR",cr,lf,0
+	
+	align 1
+	
+dis_trapv
+	movea.l	#.trapv_msg,a0
+	jmp	puts
+	
+.trapv_msg
+	dc.b	"TRAPV",cr,lf,0
+	
+	align 1
+	
+dis_rts
+	movea.l	#.rts_msg,a0
+	jmp	puts
+	
+.rts_msg
+	dc.b	"RTS",cr,lf,0
+	
+	align 1
+	
+dis_rtd
+	movea.l	#.rtd_msg,a0
+	jsr	puts
+	
+	move.w	(a6),d1
+	jsr	put_d16
+	
+	jsr	putnl
+	
+	movea.l	#dis_align_msg,a0
+	jsr	puts
+	
+	move.w	(a6)+,d1
+	jsr	put_word
+	
+	jmp	putnl
+
+.rtd_msg
+	dc.b	"RTD #",0
+	
+	align 1
+	
+dis_rte
+	movea.l	#.rte_msg,a0
+	jmp	puts
+	
+.rte_msg
+	dc.b	"RTE",cr,lf,0
+	
+	align 1
+	
+dis_stop
+	movea.l	#.stop_msg,a0
+	jsr	puts
+	
+	move.w	(a6),d1
+	jsr	put_word
+	
+	jsr	putnl
+	
+	move.l	#dis_align_msg,a0
+	jsr	puts
+	
+	move.w	(a6)+,d1
+	jsr	put_word
+	
+	jmp	putnl
+	
+.stop_msg
+	dc.b	"STOP #",0
+	
+	align 1
+	
+dis_nop
+	movea.l	#.nop_msg,a0
+	jmp	puts
+	
+.nop_msg
+	dc.b	"NOP",cr,lf,0
+	
+	align 1
+	
+dis_reset
+	movea.l	#.reset_msg,a0
+	jmp	puts
+	
+.reset_msg
+	dc.b	"RESET",cr,lf,0
+	
+	align 1
+	
+dis_illegal
+	movea.l	#.illegal_msg,a0
+	jmp	puts
+
+.illegal_msg	
+	dc.b	"ILLEGAL",cr,lf,0
+	
+	align 1
+
+dis_bgnd
+	movea.l	#.bgnd_msg,a0
+	jmp	puts
+	
+.bgnd_msg
+	dc.b	"BGND",cr,lf,0
+	
+	align 1
 	
 dis_moves
 	movea.l	#.moves_msg,a0
@@ -3427,12 +4094,12 @@ duart0_irq
 	bls	.no_rx
 	
 	move.b	#xoff,ser_rx_flow
-	move.b	#%00000011,(DUART0+DUART_IMR)
+	move.b	#%00000111,(DUART0+DUART_IMR)
 	jmp	.no_rx
 	
 .rx_xon
 	clr.b	ser_tx_flow
-	move.b	#%00000011,(DUART0+DUART_IMR)
+	move.b	#%00000111,(DUART0+DUART_IMR)
 	jmp	.no_rx
 	
 .rx_xoff
@@ -3469,9 +4136,26 @@ duart0_irq
 	jmp	.no_tx
 	
 .empty_tx_buff
-	move.b	#%00000010,(DUART0+DUART_IMR)	; turn off TX IRQ if buffer is empty
+	move.b	#%00000110,(DUART0+DUART_IMR)	; turn off TX IRQ if buffer is empty
 	
 .no_tx
+	btst	#2,(DUART0+DUART_MISR)	; check for break condition
+	beq	.no_break
+	
+	move.b	#%01010000,(DUART0+DUART_CRA)	; clear the break interrupt
+	
+	andi	#%0011111111111111,sr	; clear trace bits
+	ori	#%0000011100000000,sr	; disable interrupts
+	movec	vbr,a0	; set vector base register
+	movea.l	(a0),a7	; set supervisor stack register
+	movea.l	(4,a0),a0	; jmp to reset vector
+	
+	; this might cause issues, so maybe don't. not a big deal.
+	;jsr	flush_serial	; flush DUART before we jump
+	
+	jmp	(a0)
+	
+.no_break
 	movem.l	(a7)+,d0/a0
 	
 	rte
@@ -3659,6 +4343,8 @@ ser_rx_flow	ds.b	1	; used to pass a single character for high-priority tx (bypas
 				; this character will be transmitted regardless of tx flow control
 				; tx interrupt must be enabled. This is used for sending xon/xoff
 				; will be sent if non-zero, cleared to 0 after tx
+				
+ram_test_err	ds.l	1	; holds address of failed RAM, NULL (0) means RAM passed
 
 mon_ram_end:
 

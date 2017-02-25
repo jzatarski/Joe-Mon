@@ -45,4 +45,7 @@ abbreviated as r
 disassemble - disassembles code. WIP
 abbreviated as d
 
+Additionally, sending a serial break to the console port is set up to reboot
+the monitor.
+
 
