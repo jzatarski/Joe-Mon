@@ -1749,8 +1749,264 @@ dis_table4	; table of instructions signatures for group 4
 	dc.w	%0100100111000000
 	dc.l	.extb_long_node
 	
+	dc.w	%0000000000111111	; filter bad EA modes
+	dc.w	%0000000000111101
+	dc.w	%0000000000111111
+	dc.l	dis_unk_node
+	
+	dc.w	%0000111111000000
+	dc.w	%0000101000000000
+	dc.w	%0000101010000000
+	dc.l	.tst_node
+	
+	dc.w	%0000000000111000
+	dc.w	%0000000000001000
+	dc.w	%0000000000001000
+	dc.l	dis_unk_node
+	
+	dc.w	%1111111111000000
+	dc.w	%0100010011000000
+	dc.w	%0100010011000000
+	dc.l	.move_to_ccr_node
+	
+	dc.w	%1111111111000000
+	dc.w	%0100011011000000
+	dc.w	%0100011011000000
+	dc.l	.move_to_sr_node
+	
+	dc.w	%0000111111000000	; covers both mulu and muls
+	dc.w	%0000110000000000
+	dc.w	%0000110000000000
+	dc.l	.mul_long_node
+	
+	dc.w	%0000000000111111	; filter out immediate mode
+	dc.w	%0000000000111100
+	dc.w	%0000000000111100
+	dc.l	dis_unk_node
+	
+	dc.w	%0000000101000000	; CHK
+	dc.w	%0000000100000000
+	dc.w	%0000000100000000
+	dc.l	.chk_node
+	
+	dc.w	%0000111110000000	; MOVEM <ea>,regs
+	dc.w	%0000110010000000
+	dc.w	%0000110010000000
+	dc.l	.movem_to_reg_node
+	
+	dc.w	%0000000111000000	; LEA
+	dc.w	%0000000111000000
+	dc.w	%0000000111000000
+	dc.l	.lea_node
+	
+	dc.w	%0000111111000000	; JSR
+	dc.w	%0000111010000000
+	dc.w	%0000111010000000
+	dc.l	.jsr_node
+	
+	dc.w	%0000111111000000	; JMP
+	dc.w	%0000111011000000
+	dc.w	%0000111011000000
+	dc.l	.jmp_node
+	
+	dc.w	%0000111111000000	; PEA
+	dc.w	%0000100001000000
+	dc.w	%0000100001000000
+	dc.l	.pea_node
+	
+	dc.w	%0000000000111111	; filter out PC relative modes
+	dc.w	%0000000000111010
+	dc.w	%0000000000111011
+	dc.l	dis_unk
+	
+	dc.w	%0000111111000000	; NEGX
+	dc.w	%0000000000000000
+	dc.w	%0000000010000000
+	dc.l	.negx_node
+	
+	dc.w	%0000111111000000	; NEG
+	dc.w	%0000010000000000
+	dc.w	%0000010010000000
+	dc.l	.neg_node
+	
+	dc.w	%0000111111000000	; NBCD
+	dc.w	%0000100000000000
+	dc.w	%0000100000000000
+	dc.l	.nbcd_node
+	
+	dc.w	%0000111111000000	; NOT
+	dc.w	%0000011000000000
+	dc.w	%0000011010000000
+	dc.l	.not_node
+	
+	dc.w	%0000111111000000	; CLR
+	dc.w	%0000001000000000
+	dc.w	%0000001010000000
+	dc.l	.clr_node
+	
+	dc.w	%0000111111000000	; TAS
+	dc.w	%0000101011000000
+	dc.w	%0000101011000000
+	dc.l	.tas_node
+	
+	dc.w	%0000111111000000	; move SR,xxx
+	dc.w	%0000000011000000
+	dc.w	%0000000011000000
+	dc.l	.move_from_sr_node
+	
+	dc.w	%0000111111000000	; move CCR,xxx
+	dc.w	%0000001011000000
+	dc.w	%0000001011000000
+	dc.l	.move_from_ccr_node
+	
+	dc.w	%0000000000111000	; filter Dn mode
+	dc.w	%0000000000000000
+	dc.w	%0000000000000000
+	dc.l	dis_unk_node
+	
+	dc.w	%0000000000111000	; filter (An)+ mode
+	dc.w	%0000000000011000
+	dc.w	%0000000000011000
+	dc.l	dis_unk_node
+	
+	dc.w	%0000111110000000	; movem regs,<ea>
+	dc.w	%0000100010000000
+	dc.w	%0000100010000000
+	dc.l	.movem_from_reg_node
+		
 	dc.w	0
 	dc.l	dis_unk
+	
+.move_from_ccr_node
+	dc.w	0
+	dc.l	dis_move_from_ccr
+	
+.move_from_sr_node
+	dc.w	0
+	dc.l	dis_move_from_sr
+	
+.tas_node
+	dc.w	0
+	dc.l	dis_tas
+
+.clr_node
+	dc.w	0
+	dc.l	dis_clr
+
+.not_node
+	dc.w	0
+	dc.l	dis_not
+	
+.nbcd_node
+	dc.w	0
+	dc.l	dis_nbcd
+	
+.neg_node
+	dc.w	0
+	dc.l	dis_neg
+	
+.negx_node
+	dc.w	0
+	dc.l	dis_negx
+	
+.pea_node
+	dc.w	%0000000000111000
+	dc.w	%0000000000000000
+	dc.w	%0000000000000000
+	dc.l	dis_unk_node
+	
+	dc.w	%0000000000111000
+	dc.w	%0000000000011000
+	dc.w	%0000000000100000
+	dc.l	dis_unk_node
+	
+	dc.w	0
+	dc.l	dis_pea
+	
+.jmp_node
+	dc.w	%0000000000111000
+	dc.w	%0000000000000000
+	dc.w	%0000000000000000
+	dc.l	dis_unk_node
+	
+	dc.w	%0000000000111000
+	dc.w	%0000000000011000
+	dc.w	%0000000000100000
+	dc.l	dis_unk_node
+	
+	dc.w	0
+	dc.l	dis_jmp
+	
+.jsr_node
+	dc.w	%0000000000111000
+	dc.w	%0000000000000000
+	dc.w	%0000000000000000
+	dc.l	dis_unk_node
+	
+	dc.w	%0000000000111000
+	dc.w	%0000000000011000
+	dc.w	%0000000000100000
+	dc.l	dis_unk_node
+	
+	dc.w	0
+	dc.l	dis_jsr
+	
+.lea_node
+	dc.w	%0000000000111000
+	dc.w	%0000000000000000
+	dc.w	%0000000000000000
+	dc.l	dis_unk_node
+	
+	dc.w	%0000000000111000
+	dc.w	%0000000000011000
+	dc.w	%0000000000100000
+	dc.l	dis_unk_node
+	
+	dc.w	0
+	dc.l	dis_lea
+	
+.movem_from_reg_node
+	dc.w	0
+	dc.l	dis_movem_from_reg
+	
+.movem_to_reg_node
+	dc.w	%0000000000111000
+	dc.w	%0000000000000000
+	dc.w	%0000000000000000
+	dc.l	dis_unk_node
+	
+	dc.w	%0000000000111000
+	dc.w	%0000000000100000
+	dc.w	%0000000000100000
+	dc.l	dis_unk_node
+	
+	dc.w	0
+	dc.l	dis_movem_to_reg
+	
+.chk_node
+	dc.w	0
+	dc.l	dis_chk
+	
+.mul_long_node
+	dc.w	0
+	dc.l	dis_mul_long
+	
+.move_to_sr_node
+	dc.w	0
+	dc.l	dis_move_to_sr
+	
+.move_to_ccr_node
+	dc.w	0
+	dc.l	dis_move_to_ccr
+	
+.tst_node
+	dc.w	%0000000011111000	; byte test on An not allowed
+	dc.w	%0000000000001000
+	dc.w	%0000000000001000
+	dc.l	dis_unk_node
+	
+	dc.w	0
+	dc.l	dis_tst
 	
 .ext_long_node
 	dc.w	0
@@ -1849,6 +2105,593 @@ dis_tableF
 dis_unk_node	; used a lot, so made it a global label rather than local
 	dc.w	0
 	dc.l	dis_unk
+	
+dis_tas
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_ea_no_siz
+	
+.msg
+	dc.b	"TAS ",0
+	
+	align 1
+	
+dis_clr
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_ea
+	
+.msg
+	dc.b	"CLR.",0
+	
+	align 1
+	
+dis_not
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_ea
+	
+.msg
+	dc.b	"NOT.",0
+	
+	align 1
+	
+dis_nbcd
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_ea_no_siz
+	
+.msg
+	dc.b	"NBCD ",0
+	
+	align 1
+	
+dis_neg
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_ea
+	
+.msg
+	dc.b	"NEG.",0
+	
+	align 1
+	
+dis_negx
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_ea
+	
+.msg
+	dc.b	"NEGX.",0
+	
+	align 1
+	
+dis_pea
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_ea_no_siz
+	
+.msg
+	dc.b	"PEA ",0
+	
+	align 1
+	
+dis_jmp
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_ea_no_siz
+	
+.msg
+	dc.b	"JMP ",0
+	
+	align 1
+	
+dis_jsr
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_ea_no_siz
+	
+.msg
+	dc.b	"JSR ",0
+	
+	align 1
+	
+dis_lea
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	movea.l	#.separator_msg,a0
+	jsr	puts
+	
+	move.w	d6,d0
+	rol.w	#7,d0
+	jsr	put_nibble
+	
+	jsr	putnl
+	
+	movea.l	a6,a5
+	jmp	dis_print_op
+	
+.msg
+	dc.b	"LEA ",0
+	
+.separator_msg
+	dc.b	",A",0
+	
+	align 1
+	
+dis_movem_from_reg
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	btst	#6,d6
+	beq	.word
+	
+	move.b	#'L',d0
+	move.b	#2,d4
+	jmp	.regs
+	
+.word
+	move.b	#'W',d0
+	move.b	#1,d4
+	
+.regs
+	jsr	putc
+	
+	jsr	putsp
+	
+	move.w	(a6)+,d3
+	
+	move.w	d6,d5
+	andi.w	#%111000,d5
+	cmpi.b	#%100000,d5
+	beq	.reverse_regs
+	
+	jsr	dis_reg_mask
+	jmp	.ea
+	
+.reverse_regs
+	jsr	dis_reg_mask_reverse
+	
+.ea
+	move.b	#',',d0
+	jsr	putc
+	
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	jsr	putnl
+	
+	movea.l	#dis_align_msg,a0
+	jsr	puts
+	
+	move.w	(-2,a4),d1
+	jsr	put_word
+	jsr	putnl
+	
+	movea.l	a6,a5
+	jmp	dis_print_op
+	
+.msg
+	dc.b	"MOVEM.",0
+	
+	align 1
+	
+dis_movem_to_reg
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	btst	#6,d6
+	beq	.word
+	
+	move.b	#'L',d0
+	move.b	#2,d4
+	jmp	.ea
+	
+.word
+	move.b	#'W',d0
+	move.b	#1,d4
+	
+.ea
+	jsr	putc
+	
+	jsr	putsp
+	
+	tst.w	(a6)+
+	
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	move.b	#',',d0
+	jsr	putc
+	
+	move.w	(-2,a4),d3	; get reg mask
+	
+	jsr	dis_reg_mask
+	
+	jsr	putnl
+	
+	movea.l	#dis_align_msg,a0
+	jsr	puts
+	
+	move.w	(-2,a4),d1
+	jsr	put_word
+	jsr	putnl
+	
+	movea.l	a6,a5
+	jmp	dis_print_op
+	
+.msg
+	dc.b	"MOVEM.",0
+	
+	align 1
+	
+dis_reg_mask
+; disassemble a register mask in D3 (for MOVEM) of the normal kind
+; (not predecrement)
+; destroys d3-d0
+; d3 is the reg mask
+; d2 is register counter
+; d1 is a flag that is set when we print a register
+; (used to prevent leading /) 
+	clr.b	d1
+	clr.b	d2
+
+.data_loop	
+	btst	#0,d3
+	beq	.skip_data
+	
+	tst.b	d1
+	beq	.skip_data_slash
+	
+	move.b	#'/',d0
+	jsr	putc
+	
+.skip_data_slash
+	move.b	#'D',d0
+	jsr	putc
+	
+	move.b	d2,d0
+	jsr	put_nibble
+	
+	move.b	#1,d1
+	
+.skip_data
+	lsr	#1,d3
+	addq	#1,d2
+	cmpi	#8,d2
+	bne	.data_loop
+	
+	clr.b	d2
+
+.addr_loop	
+	btst	#0,d3
+	beq	.skip_addr
+	
+	tst.b	d1
+	beq	.skip_addr_slash
+	
+	move.b	#'/',d0
+	jsr	putc
+	
+.skip_addr_slash
+	move.b	#'A',d0
+	jsr	putc
+	
+	move.b	d2,d0
+	jsr	put_nibble
+	
+	move.b	#1,d1
+	
+.skip_addr
+	lsr	#1,d3
+	addq	#1,d2
+	cmpi	#8,d2
+	bne	.addr_loop
+	
+	rts
+	
+dis_reg_mask_reverse
+; disassemble a reverse register mask in D3 (for MOVEM)
+; (for predecrement)
+; destroys d3-d0
+; d3 is the reg mask
+; d2 is register counter
+; d1 is a flag that is set when we print a register
+; (used to prevent leading /) 
+	clr.b	d1
+	clr.b	d2
+
+.data_loop	
+	btst	#15,d3
+	beq	.skip_data
+	
+	tst.b	d1
+	beq	.skip_data_slash
+	
+	move.b	#'/',d0
+	jsr	putc
+	
+.skip_data_slash
+	move.b	#'D',d0
+	jsr	putc
+	
+	move.b	d2,d0
+	jsr	put_nibble
+	
+	move.b	#1,d1
+	
+.skip_data
+	lsl	#1,d3
+	addq	#1,d2
+	cmpi	#8,d2
+	bne	.data_loop
+	
+	clr.b	d2
+
+.addr_loop	
+	btst	#15,d3
+	beq	.skip_addr
+	
+	tst.b	d1
+	beq	.skip_addr_slash
+	
+	move.b	#'/',d0
+	jsr	putc
+	
+.skip_addr_slash
+	move.b	#'A',d0
+	jsr	putc
+	
+	move.b	d2,d0
+	jsr	put_nibble
+	
+	move.b	#1,d1
+	
+.skip_addr
+	lsl	#1,d3
+	addq	#1,d2
+	cmpi	#8,d2
+	bne	.addr_loop
+	
+	rts
+	
+dis_chk
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	btst	#7,d6
+	beq	.long
+	
+	move.b	#'W',d0
+	move.w	#1,d4
+	jmp	.ea
+	
+.long
+	move.w	#2,d4
+	move.b	#'L',d0
+	
+.ea
+	jsr	putc
+	
+	jsr	putsp
+	
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	movea.l	#.separator,a0
+	jsr	puts
+	
+	move.w	d6,d0
+	rol.w	#7,d0
+	andi.b	#%111,d0
+	jsr	put_nibble
+	
+	jsr	putnl
+	
+	movea.l	a6,a5
+	jmp	dis_print_op
+	
+.msg
+	dc.b	"CHK.",0
+	
+.separator
+	dc.b	",D",0
+	
+	align 1
+	
+dis_mul_long
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	btst	#3,(a6)
+	bne	.signed
+	
+	move.b	#'U',d0
+	jmp	.siz
+	
+.signed
+	move.b	#'S',d0
+	
+.siz
+	jsr	putc
+	
+	movea.l	#.siz_msg,a0
+	jsr	puts
+	
+	move.w	#2,d4
+	tst.w	(a6)+
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	movea.l	#.separator_msg,a0
+	jsr	puts
+	
+	btst	#2,(-2,a4)
+	beq	.single
+	
+	move.w	(-2,a4),d0
+	andi.w	#7,d0
+	jsr	put_nibble
+	
+	movea.l	#.double_msg,a0
+	jsr	puts
+	
+.single	
+	move.b	(-2,a4),d0
+	lsr.b	#4,d0
+	jsr	put_nibble
+	
+	jsr	putnl
+	
+	movea.l	#dis_align_msg,a0
+	jsr	puts
+	
+	move.w	(-2,a4),d1
+	jsr	put_word
+	jsr	putnl
+	
+	movea.l	a6,a5
+	jmp	dis_print_op
+	
+.msg
+	dc.b	"MUL",0
+	
+.siz_msg
+	dc.b	".L ",0
+	
+.separator_msg
+	dc.b	",D",0
+	
+.double_msg
+	dc.b	":D",0
+	
+	align 1
+	
+dis_move_from_sr
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	move.w	#1,d4
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	jsr	putnl
+	
+	movea.l	a6,a5
+	jmp	dis_print_op
+	
+.msg
+	dc.b	"MOVE SR,",0
+	
+	align 1
+	
+dis_move_from_ccr
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	move.w	#1,d4
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	jsr	putnl
+	
+	movea.l	a6,a5
+	jmp	dis_print_op
+	
+.msg
+	dc.b	"MOVE CCR,",0
+	
+	align 1
+
+dis_move_to_sr
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	move.w	#1,d4
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	movea.l	#.sr_msg,a0
+	jsr	puts
+	
+	movea.l	a6,a5
+	jmp	dis_print_op
+	
+.msg
+	dc.b	"MOVE ",0
+	
+.sr_msg
+	dc.b	",SR",cr,lf,0
+	
+	align 1
+	
+dis_move_to_ccr
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	move.w	#1,d4
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	movea.l	#.ccr_msg,a0
+	jsr	puts
+	
+	movea.l	a6,a5
+	jmp	dis_print_op
+	
+.msg
+	dc.b	"MOVE ",0
+	
+.ccr_msg
+	dc.b	",CCR",cr,lf,0
+	
+	align 1
+	
+dis_tst
+	movea.l	#.msg,a0
+	jsr	puts
+	
+	jmp	dis_single_ea
+
+.msg
+	dc.b	"TST.",0
+	
+	align 1
+	
+dis_single_ea
+; dissassembly for instructions with single EA in 0-5, with standard SIZ in 6-7
+; and no other operands
+	
+	move.w	d6,d4
+	andi.w	#%0000000011000000,d4
+	lsr.w	#6,d4
+	jsr	dis_print_siz
+	
+	jsr	putsp
+	
+dis_single_ea_no_siz
+; same as above, but for unsized instructions
+	
+	movea.l	a6,a4
+	jsr	dis_ea_std
+	
+	jsr	putnl
+	
+	movea.l	a6,a5
+	jmp	dis_print_op
 	
 dis_ext_w
 	movea.l	#.msg,a0
